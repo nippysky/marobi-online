@@ -1,12 +1,11 @@
 generator client {
-  provider = "prisma-client-js"
-  output   = "../lib/generated/prisma-client"
+  provider   = "prisma-client"                  // <- new client generator
+  output     = "../lib/generated/prisma-client" // <- keep output under lib
+  engineType = "client"                         // <- Rust-free architecture
 }
 
 datasource db {
   provider  = "postgresql"
-  url       = env("DATABASE_URL")  // <- pooled URL on Vercel
-  directUrl = env("DIRECT_URL")    // <- primary “direct” URL for local migrations
 }
 
 model Customer {

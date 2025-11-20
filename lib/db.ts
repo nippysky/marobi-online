@@ -1,6 +1,7 @@
 // lib/db.ts
 import "server-only";
-import { PrismaClient } from "@/lib/generated/prisma-client";
+import { PrismaClient } from "@/lib/generated/prisma-client/client";
+import { PrismaPg } from "@prisma/adapter-pg";
 
 /**
  * Avoid multiple Prisma engines during Next.js dev HMR.
@@ -15,22 +16,34 @@ declare global {
 
 /** Create a new PrismaClient with sane logging defaults. */
 function createClient(): PrismaClient {
+  const connectionString = process.env.DATABASE_URL;
+
+  if (!connectionString) {
+    throw new Error(
+      "[prisma] DATABASE_URL is not set. " +
+        "Check your DigitalOcean connection string and environment variables."
+    );
+  }
+
+  // Prisma 7 / Rust-free client: use driver adapter for Postgres
+  const adapter = new PrismaPg({ connectionString });
+
   const client = new PrismaClient({
+    adapter,
     log: process.env.NODE_ENV === "development" ? ["warn", "error"] : ["error"],
   });
 
-  // Helpful warning in dev for tiny pools (e.g., Neon with ?connection_limit=1)
+  // Helpful warning in dev for tiny pools (e.g., ?connection_limit=1)
   if (process.env.NODE_ENV !== "production") {
-    const url = process.env.DATABASE_URL || "";
-    if (/\bconnection_limit=1\b/i.test(url)) {
+    if (/\bconnection_limit=1\b/i.test(connectionString)) {
       console.warn(
-        "[prisma] DATABASE_URL has connection_limit=1 — consider 5–10 in dev to avoid pool timeouts."
+        "[prisma] DATABASE_URL has connection_limit=1 — " +
+          "consider 5–10 in dev to avoid pool timeouts."
       );
     }
   }
 
   // Graceful shutdown when the Node process ends (Node.js runtime only).
-  // (Has no effect on Vercel Edge where Prisma isn't supported.)
   try {
     process.once("beforeExit", async () => {
       try {
@@ -40,7 +53,7 @@ function createClient(): PrismaClient {
       }
     });
   } catch {
-    // process may be undefined in some runtimes; safe to ignore.
+    // `process` may be undefined in some runtimes; safe to ignore.
   }
 
   return client;
