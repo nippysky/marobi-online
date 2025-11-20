@@ -4,17 +4,6 @@ import { Pool } from "pg";
 import { PrismaClient } from "@/lib/generated/prisma-client/client";
 import { PrismaPg } from "@prisma/adapter-pg";
 
-/**
- * In production, relax Node's TLS certificate verification.
- * This avoids "self-signed certificate in certificate chain" errors
- * for all outbound TLS connections (DB, SMTP, etc).
- *
- * Traffic is still encrypted, but certificates are not verified.
- * Treat this as a pragmatic workaround; harden later if needed.
- */
-if (process.env.NODE_ENV === "production") {
-  process.env.NODE_TLS_REJECT_UNAUTHORIZED = "0";
-}
 
 /**
  * Avoid multiple Prisma engines during Next.js dev HMR.
