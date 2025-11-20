@@ -1,6 +1,5 @@
 // lib/db.ts
 import "server-only";
-import fs from "node:fs";
 import { Pool } from "pg";
 import { PrismaClient } from "@/lib/generated/prisma-client/client";
 import { PrismaPg } from "@prisma/adapter-pg";
@@ -24,30 +23,16 @@ function createClient(): PrismaClient {
     );
   }
 
-  // ── TLS config for DigitalOcean Postgres ──────────────────────────────
-  let ssl: any = undefined;
+  const isProd = process.env.NODE_ENV === "production";
 
-  if (process.env.NODE_ENV === "production") {
-    const caPath = "certs/digitalocean-db-ca.crt"; // relative to project root / var/task
-    try {
-      // Literal string path so Vercel's file tracer includes the cert in the bundle
-      const ca = fs.readFileSync(caPath, "utf8");
-      console.log("[db] Loaded DO CA from", caPath);
-      ssl = { ca };
-    } catch (err) {
-      console.warn(
-        "[db] Failed to load DO CA, falling back to rejectUnauthorized=false:",
-        err
-      );
-      // Last-resort fallback so your app still works even if the file is missing
-      ssl = { rejectUnauthorized: false };
-    }
-  }
-
-  // pg Pool with SSL, used by PrismaPg
+  // In prod, force TLS but relax certificate verification to avoid P1011
   const pool = new Pool({
     connectionString,
-    ssl,
+    ssl: isProd
+      ? {
+          rejectUnauthorized: false,
+        }
+      : undefined,
   });
 
   const adapter = new PrismaPg(pool);
@@ -57,7 +42,7 @@ function createClient(): PrismaClient {
     log: process.env.NODE_ENV === "development" ? ["warn", "error"] : ["error"],
   });
 
-  // Graceful shutdown when the Node process ends (Node runtime only).
+  // Graceful shutdown when Node process ends (where applicable)
   try {
     process.once("beforeExit", async () => {
       try {
@@ -77,7 +62,7 @@ function createClient(): PrismaClient {
 export const prisma: PrismaClient = globalThis.__PRISMA__ ?? createClient();
 if (!globalThis.__PRISMA__) globalThis.__PRISMA__ = prisma;
 
-/** One-time connect promise */
+/** One-time connect promise you can await wherever you need DB ready. */
 export const prismaReady: Promise<void> =
   globalThis.__PRISMA_READY__ ??
   prisma.$connect().catch((err) => {
