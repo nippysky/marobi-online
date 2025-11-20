@@ -1,7 +1,9 @@
 // lib/db.ts
 import "server-only";
+import "./ca-trace";
 import { PrismaClient } from "@/lib/generated/prisma-client/client";
 import { PrismaPg } from "@prisma/adapter-pg";
+
 
 /**
  * Avoid multiple Prisma engines during Next.js dev HMR.
