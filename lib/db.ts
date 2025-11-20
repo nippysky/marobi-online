@@ -1,13 +1,12 @@
 // lib/db.ts
 import "server-only";
-import "./ca-trace";
+import fs from "node:fs";
+import { Pool } from "pg";
 import { PrismaClient } from "@/lib/generated/prisma-client/client";
 import { PrismaPg } from "@prisma/adapter-pg";
 
-
 /**
  * Avoid multiple Prisma engines during Next.js dev HMR.
- * We keep the client on the global object between reloads.
  */
 declare global {
   // eslint-disable-next-line no-var
@@ -16,10 +15,8 @@ declare global {
   var __PRISMA_READY__: Promise<void> | undefined;
 }
 
-/** Create a new PrismaClient with sane logging defaults. */
 function createClient(): PrismaClient {
   const connectionString = process.env.DATABASE_URL;
-
   if (!connectionString) {
     throw new Error(
       "[prisma] DATABASE_URL is not set. " +
@@ -27,25 +24,40 @@ function createClient(): PrismaClient {
     );
   }
 
-  // Prisma 7 / Rust-free client: use driver adapter for Postgres
-  const adapter = new PrismaPg({ connectionString });
+  // ── TLS config for DigitalOcean Postgres ──────────────────────────────
+  let ssl: any = undefined;
+
+  if (process.env.NODE_ENV === "production") {
+    const caPath = "certs/digitalocean-db-ca.crt"; // relative to project root / var/task
+    try {
+      // Literal string path so Vercel's file tracer includes the cert in the bundle
+      const ca = fs.readFileSync(caPath, "utf8");
+      console.log("[db] Loaded DO CA from", caPath);
+      ssl = { ca };
+    } catch (err) {
+      console.warn(
+        "[db] Failed to load DO CA, falling back to rejectUnauthorized=false:",
+        err
+      );
+      // Last-resort fallback so your app still works even if the file is missing
+      ssl = { rejectUnauthorized: false };
+    }
+  }
+
+  // pg Pool with SSL, used by PrismaPg
+  const pool = new Pool({
+    connectionString,
+    ssl,
+  });
+
+  const adapter = new PrismaPg(pool);
 
   const client = new PrismaClient({
     adapter,
     log: process.env.NODE_ENV === "development" ? ["warn", "error"] : ["error"],
   });
 
-  // Helpful warning in dev for tiny pools (e.g., ?connection_limit=1)
-  if (process.env.NODE_ENV !== "production") {
-    if (/\bconnection_limit=1\b/i.test(connectionString)) {
-      console.warn(
-        "[prisma] DATABASE_URL has connection_limit=1 — " +
-          "consider 5–10 in dev to avoid pool timeouts."
-      );
-    }
-  }
-
-  // Graceful shutdown when the Node process ends (Node.js runtime only).
+  // Graceful shutdown when the Node process ends (Node runtime only).
   try {
     process.once("beforeExit", async () => {
       try {
@@ -55,7 +67,7 @@ function createClient(): PrismaClient {
       }
     });
   } catch {
-    // `process` may be undefined in some runtimes; safe to ignore.
+    // Some runtimes may not have `process`; safe to ignore.
   }
 
   return client;
@@ -65,13 +77,7 @@ function createClient(): PrismaClient {
 export const prisma: PrismaClient = globalThis.__PRISMA__ ?? createClient();
 if (!globalThis.__PRISMA__) globalThis.__PRISMA__ = prisma;
 
-/**
- * A one-time connect promise you can `await` wherever you need to be sure
- * the connection is established before issuing queries:
- *
- *   await prismaReady;
- *   const rows = await prisma.user.findMany();
- */
+/** One-time connect promise */
 export const prismaReady: Promise<void> =
   globalThis.__PRISMA_READY__ ??
   prisma.$connect().catch((err) => {
