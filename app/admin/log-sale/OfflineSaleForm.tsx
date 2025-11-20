@@ -29,7 +29,15 @@ import {
 import { Button } from "@/components/ui/button";
 import { Trash2, PlusCircle, Loader2 } from "lucide-react";
 import toast from "react-hot-toast";
-import { Currency } from "@/lib/generated/prisma-client/client";
+
+// Local mirror of Prisma's Currency enum for client-side use
+enum Currency {
+  NGN = "NGN",
+  USD = "USD",
+  EUR = "EUR",
+  GBP = "GBP",
+}
+
 
 /* ──────────────────────────────────────────────────────────────────────────
    Types

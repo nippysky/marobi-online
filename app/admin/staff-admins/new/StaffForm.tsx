@@ -14,9 +14,23 @@ import {
 } from "@/components/ui/select";
 import { useRouter } from "next/navigation";
 import toast from "react-hot-toast";
-import { JobRole, UserRole } from "@/lib/generated/prisma-client/client";
 import { Clipboard, RefreshCw } from "lucide-react";
 import clsx from "clsx";
+
+/* ---------- Local enum mirrors (no Prisma on client) ---------- */
+type JobRole =
+  | "SystemAdministrator"
+  | "DispatchCoordinator"
+  | "OrderProcessingSpecialist"
+  | "ProductCatalogManager"
+  | "CustomerSupportRep";
+
+type UserRole =
+  | "SuperAdmin"
+  | "ProductAdmin"
+  | "OrderAdmin"
+  | "DispatchUser"
+  | "SupportUser";
 
 /* ---------- Constants ---------- */
 const JOB_ROLE_OPTIONS: JobRole[] = [
@@ -77,7 +91,8 @@ interface Strength {
 }
 
 function calcStrength(pw: string): Strength {
-  if (!pw) return { score: 0, label: "Empty", percent: 0, color: "bg-gray-300" };
+  if (!pw)
+    return { score: 0, label: "Empty", percent: 0, color: "bg-gray-300" };
   let score = 0;
   if (pw.length >= 8) score++;
   if (pw.length >= 12) score++;
@@ -85,7 +100,6 @@ function calcStrength(pw: string): Strength {
   if (/\d/.test(pw)) score++;
   if (/[^A-Za-z0-9]/.test(pw)) score++;
 
-  // Normalize to 0–4
   if (score > 4) score = 4;
 
   const labels = ["Very Weak", "Weak", "Fair", "Strong", "Very Strong"];
@@ -139,14 +153,14 @@ export default function StaffForm({
   });
 
   function update<K extends keyof typeof form>(k: K, v: (typeof form)[K]) {
-    setForm(f => ({ ...f, [k]: v }));
+    setForm((f) => ({ ...f, [k]: v }));
   }
 
   function toggleJobRole(role: JobRole) {
-    setForm(f => ({
+    setForm((f) => ({
       ...f,
       jobRoles: f.jobRoles.includes(role)
-        ? f.jobRoles.filter(r => r !== role)
+        ? f.jobRoles.filter((r) => r !== role)
         : [...f.jobRoles, role],
     }));
   }
@@ -195,8 +209,6 @@ export default function StaffForm({
         return "Password must be at least 8 characters.";
       if (form.password !== form.confirmPassword)
         return "Passwords do not match.";
-    } else {
-      // edit mode, keeping existing: nothing
     }
 
     return null;
@@ -234,8 +246,7 @@ export default function StaffForm({
 
       if (form.passwordMode !== "none") {
         payload.generatePassword = form.passwordMode === "auto";
-        payload.password =
-          form.passwordMode === "auto" ? form.password : form.password;
+        payload.password = form.password;
       }
 
       const url = isEdit ? `/api/staff/${staffId}` : "/api/staff";
@@ -276,37 +287,34 @@ export default function StaffForm({
           { key: "none", label: "Keep Existing Password" },
           { key: "manual", label: "Set Manually" },
           { key: "auto", label: "Auto Generate" },
-        ].map(opt => {
+        ].map((opt) => {
           const active = form.passwordMode === opt.key;
-            return (
-              <button
-                key={opt.key}
-                type="button"
-                onClick={() => {
-                  update("passwordMode", opt.key as any);
-                  if (opt.key === "auto") {
-                    const p = genPassword();
-                    update("password", p);
-                    update("confirmPassword", p);
-                  } else if (opt.key === "none") {
-                    update("password", "");
-                    update("confirmPassword", "");
-                  } else {
-                    // manual
-                    update("password", "");
-                    update("confirmPassword", "");
-                  }
-                }}
-                className={clsx(
-                  "px-3 py-1 rounded text-sm border transition",
-                  active
-                    ? "bg-indigo-600 text-white border-indigo-600"
-                    : "hover:bg-gray-50"
-                )}
-              >
-                {opt.label}
-              </button>
-            );
+          return (
+            <button
+              key={opt.key}
+              type="button"
+              onClick={() => {
+                update("passwordMode", opt.key as any);
+                if (opt.key === "auto") {
+                  const p = genPassword();
+                  update("password", p);
+                  update("confirmPassword", p);
+                } else {
+                  // manual or none -> clear fields
+                  update("password", "");
+                  update("confirmPassword", "");
+                }
+              }}
+              className={clsx(
+                "px-3 py-1 rounded text-sm border transition",
+                active
+                  ? "bg-indigo-600 text-white border-indigo-600"
+                  : "hover:bg-gray-50"
+              )}
+            >
+              {opt.label}
+            </button>
+          );
         })}
       </div>
     );
@@ -320,21 +328,21 @@ export default function StaffForm({
           <Label>First Name *</Label>
           <Input
             value={form.firstName}
-            onChange={e => update("firstName", e.target.value)}
+            onChange={(e) => update("firstName", e.target.value)}
           />
         </div>
         <div className="flex flex-col space-y-2">
           <Label>Middle Name</Label>
           <Input
             value={form.middleName}
-            onChange={e => update("middleName", e.target.value)}
+            onChange={(e) => update("middleName", e.target.value)}
           />
         </div>
         <div className="flex flex-col space-y-2">
           <Label>Last Name *</Label>
           <Input
             value={form.lastName}
-            onChange={e => update("lastName", e.target.value)}
+            onChange={(e) => update("lastName", e.target.value)}
           />
         </div>
 
@@ -344,7 +352,7 @@ export default function StaffForm({
           <Input
             type="email"
             value={form.email}
-            onChange={e => update("email", e.target.value)}
+            onChange={(e) => update("email", e.target.value)}
           />
         </div>
         <div className="flex flex-col space-y-2">
@@ -352,14 +360,14 @@ export default function StaffForm({
           <Input
             type="email"
             value={form.emailPersonal}
-            onChange={e => update("emailPersonal", e.target.value)}
+            onChange={(e) => update("emailPersonal", e.target.value)}
           />
         </div>
         <div className="flex flex-col space-y-2">
           <Label>Phone *</Label>
           <Input
             value={form.phone}
-            onChange={e => update("phone", e.target.value)}
+            onChange={(e) => update("phone", e.target.value)}
           />
         </div>
 
@@ -368,7 +376,7 @@ export default function StaffForm({
           <Label>Address</Label>
           <Input
             value={form.address}
-            onChange={e => update("address", e.target.value)}
+            onChange={(e) => update("address", e.target.value)}
           />
         </div>
 
@@ -378,7 +386,7 @@ export default function StaffForm({
           <Input
             type="date"
             value={form.dateOfBirth}
-            onChange={e => update("dateOfBirth", e.target.value)}
+            onChange={(e) => update("dateOfBirth", e.target.value)}
           />
         </div>
         <div className="flex flex-col space-y-2">
@@ -386,7 +394,7 @@ export default function StaffForm({
           <Input
             type="date"
             value={form.dateOfEmployment}
-            onChange={e => update("dateOfEmployment", e.target.value)}
+            onChange={(e) => update("dateOfEmployment", e.target.value)}
           />
         </div>
         <div className="flex flex-col space-y-2">
@@ -394,7 +402,7 @@ export default function StaffForm({
           <Input
             type="date"
             value={form.dateOfResignation}
-            onChange={e => update("dateOfResignation", e.target.value)}
+            onChange={(e) => update("dateOfResignation", e.target.value)}
           />
         </div>
 
@@ -403,13 +411,13 @@ export default function StaffForm({
           <Label>User Role *</Label>
           <Select
             value={form.access}
-            onValueChange={v => update("access", v as UserRole)}
+            onValueChange={(v) => update("access", v as UserRole)}
           >
             <SelectTrigger>
               <SelectValue placeholder="Select role" />
             </SelectTrigger>
             <SelectContent>
-              {USER_ROLE_OPTIONS.map(r => (
+              {USER_ROLE_OPTIONS.map((r) => (
                 <SelectItem key={r} value={r}>
                   {r}
                 </SelectItem>
@@ -422,7 +430,7 @@ export default function StaffForm({
         <div className="md:col-span-2 flex flex-col space-y-2">
           <Label>Job Roles *</Label>
           <div className="flex flex-wrap gap-2">
-            {JOB_ROLE_OPTIONS.map(r => {
+            {JOB_ROLE_OPTIONS.map((r) => {
               const active = form.jobRoles.includes(r);
               return (
                 <button
@@ -442,7 +450,9 @@ export default function StaffForm({
             })}
           </div>
           {form.jobRoles.length === 0 && (
-            <p className="text-xs text-red-500">Select at least one job role.</p>
+            <p className="text-xs text-red-500">
+              Select at least one job role.
+            </p>
           )}
         </div>
 
@@ -454,21 +464,21 @@ export default function StaffForm({
               <Label>Guarantor Name</Label>
               <Input
                 value={form.guarantorName}
-                onChange={e => update("guarantorName", e.target.value)}
+                onChange={(e) => update("guarantorName", e.target.value)}
               />
             </div>
             <div className="flex flex-col space-y-2">
               <Label>Guarantor Address</Label>
               <Input
                 value={form.guarantorAddress}
-                onChange={e => update("guarantorAddress", e.target.value)}
+                onChange={(e) => update("guarantorAddress", e.target.value)}
               />
             </div>
             <div className="flex flex-col space-y-2">
               <Label>Guarantor Phone</Label>
               <Input
                 value={form.guarantorPhone}
-                onChange={e => update("guarantorPhone", e.target.value)}
+                onChange={(e) => update("guarantorPhone", e.target.value)}
               />
             </div>
           </div>
@@ -504,9 +514,7 @@ export default function StaffForm({
                 </button>
                 <button
                   type="button"
-                  onClick={() =>
-                    update("passwordMode", "manual")
-                  }
+                  onClick={() => update("passwordMode", "manual")}
                   className={clsx(
                     "px-3 py-1 rounded border text-sm transition",
                     form.passwordMode === "manual"
@@ -520,15 +528,11 @@ export default function StaffForm({
             )}
           </div>
 
-            {form.passwordMode !== "none" && (
+          {form.passwordMode !== "none" && (
             <div className="space-y-4">
               {form.passwordMode === "auto" && (
                 <div className="flex items-center gap-2">
-                  <Input
-                    value={form.password}
-                    readOnly
-                    className="font-mono"
-                  />
+                  <Input value={form.password} readOnly className="font-mono" />
                   <Button
                     type="button"
                     variant="outline"
@@ -559,7 +563,7 @@ export default function StaffForm({
                     <Input
                       type="password"
                       value={form.password}
-                      onChange={e => update("password", e.target.value)}
+                      onChange={(e) => update("password", e.target.value)}
                       placeholder="At least 8 chars"
                     />
                   </div>
@@ -568,7 +572,9 @@ export default function StaffForm({
                     <Input
                       type="password"
                       value={form.confirmPassword}
-                      onChange={e => update("confirmPassword", e.target.value)}
+                      onChange={(e) =>
+                        update("confirmPassword", e.target.value)
+                      }
                     />
                   </div>
                 </div>

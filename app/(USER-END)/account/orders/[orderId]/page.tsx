@@ -7,13 +7,17 @@ import { redirect } from "next/navigation";
 import { prisma } from "@/lib/db";
 import OrderDetail from "./OrderDetail";
 import { authOptions } from "@/lib/authOptions";
-import type {
-  OrderStatus,
-  OrderChannel,
-  Currency,
-} from "@/lib/generated/prisma-client/client";
 
-export default async function OrderPage({ params }: { params: Promise<{ orderId: string }> }) {
+// Local mirrors of Prisma enums for typing the view-model
+type OrderStatus = "Processing" | "Shipped" | "Delivered" | "Cancelled";
+type OrderChannel = "ONLINE" | "OFFLINE";
+type Currency = "NGN" | "USD" | "EUR" | "GBP";
+
+export default async function OrderPage({
+  params,
+}: {
+  params: Promise<{ orderId: string }>;
+}) {
   const { orderId } = await params;
   const session = await getServerSession(authOptions);
   if (!session?.user?.email) redirect("/auth/login");
@@ -36,10 +40,16 @@ export default async function OrderPage({ params }: { params: Promise<{ orderId:
         },
       },
       customer: {
-        select: { deliveryAddress: true, billingAddress: true, email: true, id: true },
+        select: {
+          deliveryAddress: true,
+          billingAddress: true,
+          email: true,
+          id: true,
+        },
       },
     },
   });
+
   if (!order) redirect("/account/orders");
 
   // only let them view their own orders
@@ -64,7 +74,8 @@ export default async function OrderPage({ params }: { params: Promise<{ orderId:
       ...i,
       image: i.image ?? "",
     })),
-    deliveryFee: 500, // TODO: wire actual delivery fee if needed
+    // TODO: wire actual delivery fee from order.deliveryFee if available
+    deliveryFee: order.deliveryFee ?? 0,
   };
 
   return (

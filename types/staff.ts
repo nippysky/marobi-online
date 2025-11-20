@@ -1,4 +1,19 @@
-import { JobRole, UserRole } from "@/lib/generated/prisma-client/client";
+// types/staff-form.ts (or wherever this lives)
+
+// Local enum mirrors – keep this file client-safe
+export type JobRole =
+  | "SystemAdministrator"
+  | "DispatchCoordinator"
+  | "OrderProcessingSpecialist"
+  | "ProductCatalogManager"
+  | "CustomerSupportRep";
+
+export type UserRole =
+  | "SuperAdmin"
+  | "ProductAdmin"
+  | "OrderAdmin"
+  | "DispatchUser"
+  | "SupportUser";
 
 export interface StaffFormValues {
   firstName: string;

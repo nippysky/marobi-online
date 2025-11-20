@@ -7,11 +7,11 @@ import { Badge } from "@/components/ui/badge";
 import { Card, CardHeader, CardTitle, CardContent } from "@/components/ui/card";
 import { ScrollArea } from "@/components/ui/scroll-area";
 import { Truck } from "lucide-react";
-import type {
-  Currency,
-  OrderStatus,
-  OrderChannel,
-} from "@/lib/generated/prisma-client/client";
+
+// Local mirrors of Prisma enums for client-side types
+type Currency = "NGN" | "USD" | "EUR" | "GBP";
+type OrderStatus = "Processing" | "Shipped" | "Delivered" | "Cancelled";
+type OrderChannel = "ONLINE" | "OFFLINE";
 
 export interface OrderDetailProps {
   order: {

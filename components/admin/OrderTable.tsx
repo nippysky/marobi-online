@@ -48,8 +48,12 @@ import { ScrollArea } from "@/components/ui/scroll-area";
 import toast from "react-hot-toast";
 import Papa from "papaparse";
 import type { OrderChannel, OrderRow } from "@/types/orders";
-import { OrderStatus, Currency } from "@/lib/generated/prisma-client/client";
 import { renderReceiptHTML } from "@/lib/receipt/html";
+
+/* ========= Local enum mirrors (no Prisma on client) ========= */
+
+type OrderStatus = "Processing" | "Shipped" | "Delivered" | "Cancelled";
+type Currency = "NGN" | "USD" | "EUR" | "GBP";
 
 /* =========================
    Belt & Suspenders helpers
@@ -146,7 +150,10 @@ function humanizeOnClient(maybeJsonOrText: string | null | undefined): string {
 /** Strip a leading courier label from a humanized "A • B • C" string. */
 function stripLeadingName(humanized: string, name: string | undefined): string {
   if (!humanized || !name) return humanized;
-  const parts = humanized.split("•").map((p) => p.trim()).filter(Boolean);
+  const parts = humanized
+    .split("•")
+    .map((p) => p.trim())
+    .filter(Boolean);
   if (parts.length === 0) return humanized;
 
   const norm = (s: string) => s.toLowerCase().replace(/\s+/g, " ").trim();
@@ -180,7 +187,10 @@ function DisplayDeliveryDetails({
         {parts.map((entry, idx) => {
           const isEta = /^ETA\s*:/i.test(entry);
           return (
-            <div key={idx} className={isEta ? "font-medium text-gray-800" : undefined}>
+            <div
+              key={idx}
+              className={isEta ? "font-medium text-gray-800" : undefined}
+            >
               {entry}
             </div>
           );
@@ -264,7 +274,7 @@ export default function OrderTable({
       },
       currency: o.currency as any,
       deliveryFee: o.deliveryFee ?? 0,
-      // NEW: supply shipping meta to the shared HTML renderer
+      // supply shipping meta to the shared HTML renderer
       shipping: {
         courierName,
         summary: summary || undefined,
@@ -299,7 +309,7 @@ export default function OrderTable({
 
   async function handlePrint(order: OrderRow) {
     const { default: printJS } = await import("print-js");
-    const html = renderReceiptHTML(toRenderPayload(order)); // contains shipping meta
+    const html = renderReceiptHTML(toRenderPayload(order));
     printJS({ printable: html, type: "raw-html", scanStyles: false });
   }
 
@@ -344,7 +354,10 @@ export default function OrderTable({
         .join(" | ");
 
       const courierName = o.deliveryOption?.name || "";
-      const human = stripLeadingName(humanizeOnClient(o.deliveryDetails), courierName);
+      const human = stripLeadingName(
+        humanizeOnClient(o.deliveryDetails),
+        courierName
+      );
 
       return {
         "Order ID": o.id,
@@ -379,197 +392,200 @@ export default function OrderTable({
     URL.revokeObjectURL(url);
   }
 
-  const columns = useMemo<ColumnDef<OrderRow>[]>(() => [
-    {
-      accessorKey: "id",
-      header: "Order ID",
-      cell: ({ getValue }) => (
-        <code className="font-mono text-sm">{getValue<string>()}</code>
-      ),
-    },
-    {
-      id: "preview",
-      header: "Order Contents",
-      cell: ({ row }) => {
-        const prods = row.original.products.slice(0, 3);
-        return (
-          <div className="flex items-center">
-            <div className="flex -space-x-2">
-              {prods.map((p, i) => (
-                <img
-                  key={i}
-                  src={p.image || "/placeholder.png"}
-                  alt={p.name}
-                  className="h-8 w-8 rounded-md border-2 border-white object-cover"
-                  style={{ zIndex: prods.length - i }}
-                />
-              ))}
-              {row.original.products.length > 3 && (
-                <div className="h-8 w-8 rounded-md bg-gray-200 text-xs font-medium flex items-center justify-center border-2 border-white">
-                  +{row.original.products.length - 3}
-                </div>
+  const columns = useMemo<ColumnDef<OrderRow>[]>(
+    () => [
+      {
+        accessorKey: "id",
+        header: "Order ID",
+        cell: ({ getValue }) => (
+          <code className="font-mono text-sm">{getValue<string>()}</code>
+        ),
+      },
+      {
+        id: "preview",
+        header: "Order Contents",
+        cell: ({ row }) => {
+          const prods = row.original.products.slice(0, 3);
+          return (
+            <div className="flex items-center">
+              <div className="flex -space-x-2">
+                {prods.map((p, i) => (
+                  <img
+                    key={i}
+                    src={p.image || "/placeholder.png"}
+                    alt={p.name}
+                    className="h-8 w-8 rounded-md border-2 border-white object-cover"
+                    style={{ zIndex: prods.length - i }}
+                  />
+                ))}
+                {row.original.products.length > 3 && (
+                  <div className="h-8 w-8 rounded-md bg-gray-200 text-xs font-medium flex items-center justify-center border-2 border-white">
+                    +{row.original.products.length - 3}
+                  </div>
+                )}
+              </div>
+              <Button
+                variant="outline"
+                size="sm"
+                className="ml-2 whitespace-nowrap"
+                onClick={() => openReceiptModal(row.original)}
+              >
+                View All
+              </Button>
+            </div>
+          );
+        },
+      },
+      {
+        accessorKey: "status",
+        header: "Status",
+        cell: ({ row }) => {
+          const s = row.original.status;
+          const color =
+            s === "Processing"
+              ? "bg-blue-100 text-blue-800"
+              : s === "Shipped"
+              ? "bg-yellow-100 text-yellow-800"
+              : s === "Delivered"
+              ? "bg-green-100 text-green-800"
+              : s === "Cancelled"
+              ? "bg-red-100 text-red-800"
+              : "";
+          const isUpdating = updatingIds.has(row.original.id);
+          return (
+            <div className="flex items-center gap-2">
+              <span
+                className={`px-2 py-0.5 rounded-full text-sm font-medium ${color}`}
+              >
+                {s}
+              </span>
+              <Select
+                value={row.original.status}
+                onValueChange={(v) =>
+                  handleStatusChange(row.original.id, v as OrderStatus)
+                }
+                disabled={isUpdating}
+              >
+                <SelectTrigger className="h-8 px-2 w-auto">
+                  <SelectValue />
+                </SelectTrigger>
+                <SelectContent>
+                  {STATUS_OPTIONS.map((s2) => (
+                    <SelectItem key={s2} value={s2}>
+                      {s2}
+                    </SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
+              {isUpdating && (
+                <RefreshCcw className="animate-spin h-4 w-4 text-gray-600" />
               )}
             </div>
+          );
+        },
+      },
+      {
+        id: "amountNGN",
+        header: "Amount (NGN)",
+        accessorFn: (r) => r.totalNGN,
+        cell: ({ getValue }) => (
+          <span className="font-medium">
+            ₦{getValue<number>().toLocaleString()}
+          </span>
+        ),
+        enableSorting: true,
+      },
+      {
+        id: "amount",
+        header: "Amount",
+        accessorFn: (r) => r.totalAmount,
+        cell: ({ getValue, row }) => {
+          const sym =
+            row.original.currency === "NGN"
+              ? "₦"
+              : row.original.currency === "USD"
+              ? "$"
+              : row.original.currency === "EUR"
+              ? "€"
+              : "£";
+          return (
+            <span className="font-medium">
+              {sym}
+              {getValue<number>().toLocaleString()}
+            </span>
+          );
+        },
+        enableSorting: true,
+      },
+      { accessorKey: "currency", header: "Currency" },
+      {
+        accessorKey: "channel",
+        header: "Channel",
+        cell: ({ getValue }) => {
+          const v = getValue<OrderChannel>();
+          return v === "OFFLINE" ? "Offline Sale" : "Online Store";
+        },
+      },
+      {
+        id: "customer",
+        header: "Customer",
+        cell: ({ row }) => {
+          const cust = row.original.customer;
+          if (cust.id) {
+            return (
+              <Link
+                href={`/admin/customers/${cust.id}`}
+                className="text-indigo-600 hover:underline"
+              >
+                {cust.name}
+              </Link>
+            );
+          }
+          return <span className="text-gray-500">Guest</span>;
+        },
+      },
+      {
+        id: "delivery",
+        header: "Delivery",
+        cell: ({ row }) => {
+          const name = row.original.deliveryOption?.name || "";
+          const fee = row.original.deliveryFee;
+          const details = row.original.deliveryDetails;
+
+          return (
+            <div className="text-sm">
+              {name ? <div className="font-medium">{name}</div> : null}
+              {typeof fee === "number" && (
+                <div className="text-xs text-gray-500">
+                  Fee: ₦{fee.toLocaleString()}
+                </div>
+              )}
+              <div className="text-xs mt-1 text-gray-600">
+                <DisplayDeliveryDetails details={details} omitName={name} />
+              </div>
+            </div>
+          );
+        },
+      },
+      {
+        id: "actions",
+        header: "Actions",
+        cell: ({ row }) => (
+          <div className="flex items-center space-x-2">
             <Button
-              variant="outline"
-              size="sm"
-              className="ml-2 whitespace-nowrap"
-              onClick={() => openReceiptModal(row.original)}
+              variant="ghost"
+              size="icon"
+              onClick={() => handlePrint(row.original)}
+              className="text-gray-600 hover:text-gray-900"
             >
-              View All
+              <Printer className="h-5 w-5" />
             </Button>
           </div>
-        );
+        ),
       },
-    },
-    {
-      accessorKey: "status",
-      header: "Status",
-      cell: ({ row }) => {
-        const s = row.original.status;
-        const color =
-          s === "Processing"
-            ? "bg-blue-100 text-blue-800"
-            : s === "Shipped"
-            ? "bg-yellow-100 text-yellow-800"
-            : s === "Delivered"
-            ? "bg-green-100 text-green-800"
-            : s === "Cancelled"
-            ? "bg-red-100 text-red-800"
-            : "";
-        const isUpdating = updatingIds.has(row.original.id);
-        return (
-          <div className="flex items-center gap-2">
-            <span
-              className={`px-2 py-0.5 rounded-full text-sm font-medium ${color}`}
-            >
-              {s}
-            </span>
-            <Select
-              value={row.original.status}
-              onValueChange={(v) =>
-                handleStatusChange(row.original.id, v as OrderStatus)
-              }
-              disabled={isUpdating}
-            >
-              <SelectTrigger className="h-8 px-2 w-auto">
-                <SelectValue />
-              </SelectTrigger>
-              <SelectContent>
-                {STATUS_OPTIONS.map((s2) => (
-                  <SelectItem key={s2} value={s2}>
-                    {s2}
-                  </SelectItem>
-                ))}
-              </SelectContent>
-            </Select>
-            {isUpdating && (
-              <RefreshCcw className="animate-spin h-4 w-4 text-gray-600" />
-            )}
-          </div>
-        );
-      },
-    },
-    {
-      id: "amountNGN",
-      header: "Amount (NGN)",
-      accessorFn: (r) => r.totalNGN,
-      cell: ({ getValue }) => (
-        <span className="font-medium">
-          ₦{getValue<number>().toLocaleString()}
-        </span>
-      ),
-      enableSorting: true,
-    },
-    {
-      id: "amount",
-      header: "Amount",
-      accessorFn: (r) => r.totalAmount,
-      cell: ({ getValue, row }) => {
-        const sym =
-          row.original.currency === "NGN"
-            ? "₦"
-            : row.original.currency === "USD"
-            ? "$"
-            : row.original.currency === "EUR"
-            ? "€"
-            : "£";
-        return (
-          <span className="font-medium">
-            {sym}
-            {getValue<number>().toLocaleString()}
-          </span>
-        );
-      },
-      enableSorting: true,
-    },
-    { accessorKey: "currency", header: "Currency" },
-    {
-      accessorKey: "channel",
-      header: "Channel",
-      cell: ({ getValue }) => {
-        const v = getValue<OrderChannel>();
-        return v === "OFFLINE" ? "Offline Sale" : "Online Store";
-      },
-    },
-    {
-      id: "customer",
-      header: "Customer",
-      cell: ({ row }) => {
-        const cust = row.original.customer;
-        if (cust.id) {
-          return (
-            <Link
-              href={`/admin/customers/${cust.id}`}
-              className="text-indigo-600 hover:underline"
-            >
-              {cust.name}
-            </Link>
-          );
-        }
-        return <span className="text-gray-500">Guest</span>;
-      },
-    },
-    {
-      id: "delivery",
-      header: "Delivery",
-      cell: ({ row }) => {
-        const name = row.original.deliveryOption?.name || "";
-        const fee = row.original.deliveryFee;
-        const details = row.original.deliveryDetails;
-
-        return (
-          <div className="text-sm">
-            {name ? <div className="font-medium">{name}</div> : null}
-            {typeof fee === "number" && (
-              <div className="text-xs text-gray-500">
-                Fee: ₦{fee.toLocaleString()}
-              </div>
-            )}
-            <div className="text-xs mt-1 text-gray-600">
-              <DisplayDeliveryDetails details={details} omitName={name} />
-            </div>
-          </div>
-        );
-      },
-    },
-    {
-      id: "actions",
-      header: "Actions",
-      cell: ({ row }) => (
-        <div className="flex items-center space-x-2">
-          <Button
-            variant="ghost"
-            size="icon"
-            onClick={() => handlePrint(row.original)}
-            className="text-gray-600 hover:text-gray-900"
-          >
-            <Printer className="h-5 w-5" />
-          </Button>
-        </div>
-      ),
-    },
-  ], [updatingIds]);
+    ],
+    [updatingIds]
+  );
 
   const table = useReactTable({
     data: filtered,
@@ -602,7 +618,10 @@ export default function OrderTable({
                 className="w-full max-w-sm"
               />
               <div className="flex space-x-2">
-                <Select value={statusFilter} onValueChange={(v) => setStatusFilter(v as any)}>
+                <Select
+                  value={statusFilter}
+                  onValueChange={(v) => setStatusFilter(v as any)}
+                >
                   <SelectTrigger className="w-[160px]">
                     <SelectValue placeholder="All Statuses" />
                   </SelectTrigger>
@@ -615,7 +634,10 @@ export default function OrderTable({
                     ))}
                   </SelectContent>
                 </Select>
-                <Select value={currencyFilter} onValueChange={(v) => setCurrencyFilter(v as any)}>
+                <Select
+                  value={currencyFilter}
+                  onValueChange={(v) => setCurrencyFilter(v as any)}
+                >
                   <SelectTrigger className="w-[160px]">
                     <SelectValue placeholder="All Currencies" />
                   </SelectTrigger>
@@ -651,13 +673,20 @@ export default function OrderTable({
                     >
                       {!header.isPlaceholder && (
                         <div className="flex items-center">
-                          {flexRender(header.column.columnDef.header, header.getContext())}
+                          {flexRender(
+                            header.column.columnDef.header,
+                            header.getContext()
+                          )}
                           {canSort && (
                             <span className="ml-1">
-                              {({
-                                asc: <ChevronUp className="h-4 w-4" />,
-                                desc: <ChevronDown className="h-4 w-4" />,
-                              } as any)[header.column.getIsSorted() as string] ?? null}
+                              {
+                                ({
+                                  asc: <ChevronUp className="h-4 w-4" />,
+                                  desc: <ChevronDown className="h-4 w-4" />,
+                                } as any)[
+                                  header.column.getIsSorted() as string
+                                ] ?? null
+                              }
                             </span>
                           )}
                         </div>
@@ -670,7 +699,10 @@ export default function OrderTable({
           </TableHeader>
           <TableBody>
             {table.getRowModel().rows.map((row) => (
-              <TableRow key={row.id} className="even:bg-white odd:bg-gray-50 hover:bg-gray-100">
+              <TableRow
+                key={row.id}
+                className="even:bg-white odd:bg-gray-50 hover:bg-gray-100"
+              >
                 {row.getVisibleCells().map((cell) => (
                   <TableCell key={cell.id} className="px-4 py-2">
                     {flexRender(cell.column.columnDef.cell, cell.getContext())}
@@ -680,7 +712,10 @@ export default function OrderTable({
             ))}
             {filtered.length === 0 && (
               <TableRow>
-                <TableCell colSpan={table.getAllColumns().length} className="text-center py-6 text-gray-500">
+                <TableCell
+                  colSpan={table.getAllColumns().length}
+                  className="text-center py-6 text-gray-500"
+                >
                   No orders match your criteria.
                 </TableCell>
               </TableRow>
@@ -691,13 +726,22 @@ export default function OrderTable({
 
       {showPagination && (
         <div className="flex items-center justify-between py-4">
-          <Button variant="link" onClick={() => table.previousPage()} disabled={!table.getCanPreviousPage()}>
+          <Button
+            variant="link"
+            onClick={() => table.previousPage()}
+            disabled={!table.getCanPreviousPage()}
+          >
             ← Prev
           </Button>
           <span className="text-sm text-gray-700">
-            Page {table.getState().pagination.pageIndex + 1} of {table.getPageCount()}
+            Page {table.getState().pagination.pageIndex + 1} of{" "}
+            {table.getPageCount()}
           </span>
-          <Button variant="link" onClick={() => table.nextPage()} disabled={!table.getCanNextPage()}>
+          <Button
+            variant="link"
+            onClick={() => table.nextPage()}
+            disabled={!table.getCanNextPage()}
+          >
             Next →
           </Button>
           <select
@@ -742,7 +786,10 @@ export default function OrderTable({
               <Button variant="outline" onClick={() => setReceiptOpen(false)}>
                 Close
               </Button>
-              <Button variant="secondary" onClick={() => handlePrint(receiptOrder!)}>
+              <Button
+                variant="secondary"
+                onClick={() => handlePrint(receiptOrder!)}
+              >
                 <Printer className="mr-1 h-4 w-4" /> Print
               </Button>
             </DialogFooter>

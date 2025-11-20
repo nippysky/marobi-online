@@ -1,4 +1,8 @@
-import { OrderStatus, Currency } from "@/lib/generated/prisma-client/client";
+// types/orders.ts (or wherever this lives)
+
+// Local enum mirrors – no Prisma client imports here
+export type OrderStatus = "Processing" | "Shipped" | "Delivered" | "Cancelled";
+export type Currency = "NGN" | "USD" | "EUR" | "GBP";
 
 export type OrderChannel = "ONLINE" | "OFFLINE";
 

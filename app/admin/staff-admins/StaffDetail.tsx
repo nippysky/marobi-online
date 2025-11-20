@@ -6,7 +6,21 @@ import {
   CardTitle,
   CardContent,
 } from "@/components/ui/card";
-import { JobRole, UserRole } from "@/lib/generated/prisma-client/client";
+
+// Local mirrors of Prisma enums (schema-safe but client-only)
+type JobRole =
+  | "SystemAdministrator"
+  | "DispatchCoordinator"
+  | "OrderProcessingSpecialist"
+  | "ProductCatalogManager"
+  | "CustomerSupportRep";
+
+type UserRole =
+  | "SuperAdmin"
+  | "ProductAdmin"
+  | "OrderAdmin"
+  | "DispatchUser"
+  | "SupportUser";
 
 interface StaffDetailProps {
   staff: {
@@ -20,18 +34,19 @@ interface StaffDetailProps {
     address: string | null;
     jobRoles: JobRole[];
     access: UserRole;
-    dateOfBirth: Date | null;
-    dateOfEmployment: Date | null;
-    dateOfResignation: Date | null;
+    dateOfBirth: Date | string | null;
+    dateOfEmployment: Date | string | null;
+    dateOfResignation: Date | string | null;
     guarantorName: string | null;
     guarantorAddress: string | null;
     guarantorPhone: string | null;
-    createdAt: Date;
+    createdAt: Date | string;
   };
 }
 
-function fmt(d: Date | null | undefined) {
-  return d ? new Date(d).toLocaleDateString() : "—";
+function fmt(d: Date | string | null | undefined) {
+  if (!d) return "—";
+  return new Date(d).toLocaleDateString();
 }
 
 export default function StaffDetail({ staff }: StaffDetailProps) {
@@ -92,13 +107,9 @@ export default function StaffDetail({ staff }: StaffDetailProps) {
         {/* Right column */}
         <dl className="space-y-4">
           <div>
-            <dt className="text-xs uppercase text-gray-400">
-              Job Role(s)
-            </dt>
+            <dt className="text-xs uppercase text-gray-400">Job Role(s)</dt>
             <dd className="text-base font-semibold text-gray-900">
-              {staff.jobRoles.length
-                ? staff.jobRoles.join(", ")
-                : "—"}
+              {staff.jobRoles.length ? staff.jobRoles.join(", ") : "—"}
             </dd>
           </div>
           <div>
@@ -114,9 +125,7 @@ export default function StaffDetail({ staff }: StaffDetailProps) {
               Date of Resignation
             </dt>
             <dd className="text-base font-semibold text-gray-900">
-              {staff.dateOfResignation
-                ? fmt(staff.dateOfResignation)
-                : "Active"}
+              {staff.dateOfResignation ? fmt(staff.dateOfResignation) : "Active"}
             </dd>
           </div>
           <div>
