@@ -11,7 +11,7 @@ import type {
   OrderStatus,
   OrderChannel,
   Currency,
-} from "@/lib/generated/prisma-client";
+} from "@/lib/generated/prisma-client/client";
 
 export default async function OrderPage({ params }: { params: Promise<{ orderId: string }> }) {
   const { orderId } = await params;

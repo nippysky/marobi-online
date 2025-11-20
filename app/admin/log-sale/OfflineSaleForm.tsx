@@ -29,7 +29,7 @@ import {
 import { Button } from "@/components/ui/button";
 import { Trash2, PlusCircle, Loader2 } from "lucide-react";
 import toast from "react-hot-toast";
-import { Currency } from "@/lib/generated/prisma-client";
+import { Currency } from "@/lib/generated/prisma-client/client";
 
 /* ──────────────────────────────────────────────────────────────────────────
    Types

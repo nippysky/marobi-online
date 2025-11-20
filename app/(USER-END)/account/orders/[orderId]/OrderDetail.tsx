@@ -11,7 +11,7 @@ import type {
   Currency,
   OrderStatus,
   OrderChannel,
-} from "@/lib/generated/prisma-client";
+} from "@/lib/generated/prisma-client/client";
 
 export interface OrderDetailProps {
   order: {

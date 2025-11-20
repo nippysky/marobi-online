@@ -4,7 +4,7 @@ export const dynamic = "force-dynamic";
 import { NextResponse } from "next/server";
 import bcrypt from "bcryptjs";
 import prisma, { prismaReady } from "@/lib/db";
-import { JobRole, UserRole } from "@/lib/generated/prisma-client";
+import { JobRole, UserRole } from "@/lib/generated/prisma-client/client";
 
 /** Generate a readable/strong password if requested */
 function randomPassword(len = 12) {

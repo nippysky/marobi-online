@@ -6,7 +6,7 @@ import {
   CardTitle,
   CardContent,
 } from "@/components/ui/card";
-import { JobRole, UserRole } from "@/lib/generated/prisma-client";
+import { JobRole, UserRole } from "@/lib/generated/prisma-client/client";
 
 interface StaffDetailProps {
   staff: {

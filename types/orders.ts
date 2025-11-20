@@ -1,4 +1,4 @@
-import { OrderStatus, Currency } from "@/lib/generated/prisma-client";
+import { OrderStatus, Currency } from "@/lib/generated/prisma-client/client";
 
 export type OrderChannel = "ONLINE" | "OFFLINE";
 

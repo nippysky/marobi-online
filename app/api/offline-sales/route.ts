@@ -8,7 +8,7 @@ import {
   Currency as CurrencyEnum,
   OrderChannel,
   OrderStatus,
-} from "@/lib/generated/prisma-client";
+} from "@/lib/generated/prisma-client/client";
 import { sendGenericEmail } from "@/lib/mail";
 
 /* ────────────────────────────────────────────────────────────

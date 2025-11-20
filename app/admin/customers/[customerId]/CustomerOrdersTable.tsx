@@ -33,7 +33,7 @@ import { ScrollArea } from "@/components/ui/scroll-area";
 import toast from "react-hot-toast";
 
 import { AdminCustomerOrder } from "@/types/admin";
-import { Currency, OrderStatus } from "@/lib/generated/prisma-client";
+import { Currency, OrderStatus } from "@/lib/generated/prisma-client/client";
 
 type Props = { initialData: AdminCustomerOrder[] };
 

@@ -7,7 +7,7 @@ import {
   Currency as CurrencyEnum,
   OrderChannel,
   OrderStatus,
-} from "@/lib/generated/prisma-client";
+} from "@/lib/generated/prisma-client/client";
 import { sendReceiptEmailWithRetry } from "@/lib/mail";
 import { getServerSession } from "next-auth/next";
 import { authOptions } from "@/lib/authOptions";

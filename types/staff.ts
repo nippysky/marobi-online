@@ -1,4 +1,4 @@
-import { JobRole, UserRole } from "@/lib/generated/prisma-client";
+import { JobRole, UserRole } from "@/lib/generated/prisma-client/client";
 
 export interface StaffFormValues {
   firstName: string;

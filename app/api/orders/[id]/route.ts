@@ -3,7 +3,7 @@ export const dynamic = "force-dynamic";
 
 import { NextRequest, NextResponse } from "next/server";
 import prisma, { prismaReady } from "@/lib/db";
-import { OrderStatus } from "@/lib/generated/prisma-client";
+import { OrderStatus } from "@/lib/generated/prisma-client/client";
 import { sendStatusEmail } from "@/lib/mail";
 
 // Keep this in sync with your Prisma enum

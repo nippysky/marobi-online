@@ -48,7 +48,7 @@ import { ScrollArea } from "@/components/ui/scroll-area";
 import toast from "react-hot-toast";
 import Papa from "papaparse";
 import type { OrderChannel, OrderRow } from "@/types/orders";
-import { OrderStatus, Currency } from "@/lib/generated/prisma-client";
+import { OrderStatus, Currency } from "@/lib/generated/prisma-client/client";
 import { renderReceiptHTML } from "@/lib/receipt/html";
 
 /* =========================

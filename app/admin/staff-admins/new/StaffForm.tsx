@@ -14,7 +14,7 @@ import {
 } from "@/components/ui/select";
 import { useRouter } from "next/navigation";
 import toast from "react-hot-toast";
-import { JobRole, UserRole } from "@/lib/generated/prisma-client";
+import { JobRole, UserRole } from "@/lib/generated/prisma-client/client";
 import { Clipboard, RefreshCw } from "lucide-react";
 import clsx from "clsx";
 
