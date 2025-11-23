@@ -1,102 +1,76 @@
 // lib/receipt/html.ts
-// Single-source, brand-consistent receipt HTML used by:
-// 1) customer receipt emails
-// 2) admin "View All" modal
-// 3) admin "Print" action
 //
-// Keep this the one place you tweak visuals going forward.
-
-export type ReceiptCurrency = "NGN" | "USD" | "EUR" | "GBP" | (string & {});
-export interface ReceiptOrderForRender {
-  id: string;
-  createdAt: string | Date;
-  items: Array<{
-    name: string;
-    image?: string | null;
-    quantity: number;
-    lineTotal: number;
-    color?: string | null;
-    size?: string | null;
-    hasSizeMod?: boolean;
-    sizeModFee?: number;
-    customSize?: Record<string, any> | null | undefined;
-  }>;
-  totalAmount: number; // items subtotal (no shipping)
-  paymentMethod: string;
-}
-export interface ReceiptRecipient {
-  firstName: string;
-  lastName: string;
-  email: string;
-  deliveryAddress?: string;
-  billingAddress?: string;
-}
-
-/** Optional shipping meta passed from admin table */
-export interface ReceiptShippingMeta {
-  courierName?: string;
-  /** Humanized "Courier • Weight: X • ETA: Y" (we’ll parse ETA/Weight defensively) */
-  summary?: string;
-}
-
-/* ---- Brand tokens shared with mail / layout ---- */
+// Shared HTML renderer for:
+//  - Receipt emails
+//  - Printable order receipt in the admin
+//
+// This version:
+//  - Uses Montserrat font stack
+//  - Shows brand logo from /Marobi_Logo.svg (dark green on white)
+//  - Correctly surfaces courier name for Shipbubble AND normal delivery options.
 
 const BRAND_NAME = "Marobi";
 const BRAND_COLOR = "#043927";
-const BRAND_FONT_STACK =
-  "'Montserrat', -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif";
+const MUTED = "#6b7280";
+const BORDER = "#e5e7eb";
+const CARD_BG = "#ffffff";
+const BG = "#f3f4f6";
 
-/** For client-side usage we prefer NEXT_PUBLIC_APP_URL or window.location.origin. */
-function resolveAssetBaseUrl(assetBaseUrl?: string): string {
-  if (assetBaseUrl) {
-    return assetBaseUrl.replace(/\/+$/, "");
-  }
+type AnyOrder = any;
 
-  // Browser (admin UI): use current origin
-  if (typeof window !== "undefined" && window.location?.origin) {
-    return window.location.origin.replace(/\/+$/, "");
-  }
+interface Recipient {
+  firstName: string;
+  lastName: string;
+  email: string;
+  deliveryAddress?: string | null;
+  billingAddress?: string | null;
+}
 
-  // Server-side fallback for weird cases (e.g. tests)
-  const raw =
-    process.env.NEXT_PUBLIC_APP_URL || "https://marobionline.com";
+interface RenderReceiptArgs {
+  order: AnyOrder;
+  recipient: Recipient;
+  currency: string; // "NGN" | "USD" | ...
+  deliveryFee: number;
+}
+
+function moneyLabel(currency: string, amount: number): string {
+  const c = (currency || "NGN").toUpperCase();
+  const symbol =
+    c === "NGN" ? "₦" : c === "USD" ? "$" : c === "EUR" ? "€" : c === "GBP" ? "£" : "";
+  const formatted = Number(amount || 0).toLocaleString();
+  if (!symbol && c === "NGN") return `NGN ${formatted}`;
+  if (!symbol) return `${c} ${formatted}`;
+  return `${symbol}${formatted}`;
+}
+
+function safeDate(d: string | Date): string {
   try {
-    const u = new URL(raw);
-    return u.origin;
+    return new Date(d).toLocaleDateString();
   } catch {
-    return raw.replace(/\/+$/, "");
+    return "";
   }
 }
 
-function currencySymbol(c: ReceiptCurrency) {
-  const up = String(c).toUpperCase();
-  if (up === "NGN") return "₦";
-  if (up === "USD") return "$";
-  if (up === "EUR") return "€";
-  return "£";
-}
+function getCourierName(order: AnyOrder): string | null {
+  const details = (order?.deliveryDetails as any) || {};
+  const shipbubble = details?.shipbubble || {};
 
-/** Pull "ETA: ..." and "Weight: ..." out of a humanized string if present */
-function parseEtaAndWeight(summary?: string) {
-  let eta = "";
-  let weight = "";
-  if (summary && summary.includes("•")) {
-    const parts = summary
-      .split("•")
-      .map((p) => p.trim())
-      .filter(Boolean);
-    const etaPart = parts.find((p) => /^ETA\s*:/.test(p));
-    const wPart = parts.find((p) => /^Weight\s*:/.test(p));
-    if (etaPart) eta = etaPart.replace(/^ETA\s*:\s*/i, "").trim();
-    if (wPart) weight = wPart.replace(/^Weight\s*:\s*/i, "").trim();
-  } else if (summary) {
-    // very short summary; attempt simple matches
-    const mEta = summary.match(/ETA\s*:\s*([^•]+)/i);
-    const mW = summary.match(/Weight\s*:\s*([^•]+)/i);
-    if (mEta) eta = mEta[1].trim();
-    if (mW) weight = mW[1].trim();
+  // 1) Shipbubble courier name (used for your current flow: GIG Logistics, Fez, etc.)
+  if (typeof shipbubble.courierName === "string" && shipbubble.courierName.trim()) {
+    return shipbubble.courierName.trim();
   }
-  return { eta, weight };
+
+  // 2) Fallback: deliveryOption relation (traditional delivery options)
+  if (order?.deliveryOption?.name) {
+    return String(order.deliveryOption.name);
+  }
+
+  // 3) Fallback: generic courierName on deliveryDetails, if you ever store it there
+  if (typeof details.courierName === "string" && details.courierName.trim()) {
+    return details.courierName.trim();
+  }
+
+  return null;
 }
 
 export function renderReceiptHTML({
@@ -104,221 +78,354 @@ export function renderReceiptHTML({
   recipient,
   currency,
   deliveryFee,
-  shipping, // includes courierName + humanized summary
-  assetBaseUrl,
-}: {
-  order: ReceiptOrderForRender;
-  recipient: ReceiptRecipient;
-  currency: ReceiptCurrency;
-  deliveryFee: number;
-  shipping?: ReceiptShippingMeta;
-  /** Optional base URL for assets (emails should pass an absolute origin). */
-  assetBaseUrl?: string;
-}) {
-  const sym = currencySymbol(currency);
+}: RenderReceiptArgs): string {
+  const name = `${recipient.firstName || ""} ${recipient.lastName || ""}`.trim();
   const subtotal = Number(order.totalAmount ?? 0);
-  const shippingFee = Number(deliveryFee ?? 0);
-  const total = +(subtotal + shippingFee).toFixed(2);
-  const name = `${recipient.firstName} ${recipient.lastName}`.trim();
-  const orderDate = new Date(order.createdAt).toLocaleDateString();
+  const shipping = Number(deliveryFee ?? order.deliveryFee ?? 0);
+  const total = +(subtotal + shipping).toFixed(2);
 
-  const { eta, weight } = parseEtaAndWeight(shipping?.summary);
+  const courierName = getCourierName(order);
+  const courierDisplay = courierName || "—";
 
-  const base = resolveAssetBaseUrl(assetBaseUrl);
-  // Green logo for light backgrounds (good for white A4 prints)
-  const RECEIPT_LOGO = `${base}/Marobi_Logo.png`;
+  const symbolTotal = moneyLabel(currency, total);
+  const symbolSubtotal = moneyLabel(currency, subtotal);
+  const symbolShipping = moneyLabel(currency, shipping);
 
-  const rows = order.items
-    .map((p, i) => {
-      const alt = i % 2 === 0 ? "background:#fafafa;" : "";
-      const parts: string[] = [];
-      if (p.color) parts.push(`Color: ${p.color}`);
-      parts.push(`Size: ${p.hasSizeMod ? "Custom" : (p.size ?? "—")}`);
+  const orderDate = safeDate(order.createdAt);
+  const orderId = order.id || "";
+  const paymentMethod = order.paymentMethod || "—";
 
-      const sizeMod =
-        p.hasSizeMod && p.sizeModFee
-          ? `<div style="font-size:12px;color:#92400e;font-family:${BRAND_FONT_STACK};">+5% size-mod fee: ${sym}${(p.sizeModFee * p.quantity).toLocaleString()}</div>`
-          : "";
-
-      let custom = "";
-      if (p.hasSizeMod && p.customSize && Object.keys(p.customSize).length) {
-        const readable = Object.entries(p.customSize)
-          .filter(([_, v]) => v !== null && v !== undefined && String(v).trim() !== "")
-          .map(([k, v]) => `${k}: ${v}`)
-          .join(" • ");
-        if (readable) {
-          custom = `<div style="font-size:12px;color:#374151;font-family:${BRAND_FONT_STACK};">Custom measurements: ${readable}</div>`;
-        }
-      }
-
-      return `
-      <tr style="${alt}">
-        <td style="padding:10px 12px;">
-          <div style="display:flex;gap:20px;align-items:flex-start">
-            ${
-              p.image
-                ? `<img src="${p.image}" width="44" height="44" style="object-fit:cover;border-radius:6px;border:1px solid #e5e7eb" />`
-                : ""
-            }
-            <div style="margin-left: 30px;">
-              <div style="font-weight:600;color:#111827;font-family:${BRAND_FONT_STACK};">${p.name}</div>
-              <div style="font-size:12px;color:#6b7280;font-family:${BRAND_FONT_STACK};">${parts.join(" • ")}</div>
-              ${sizeMod}
-              ${custom}
-            </div>
-          </div>
-        </td>
-        <td style="padding:10px 12px;white-space:nowrap;text-align:center;color:#111827;font-family:${BRAND_FONT_STACK};">${p.quantity}</td>
-        <td style="padding:10px 12px;white-space:nowrap;text-align:right;color:#111827;font-weight:600;font-family:${BRAND_FONT_STACK};">${sym}${p.lineTotal.toLocaleString()}</td>
-      </tr>`;
-    })
-    .join("");
+  const items = Array.isArray(order.items) ? order.items : [];
 
   return `<!DOCTYPE html>
-<html>
+<html lang="en">
 <head>
-  <meta charset="UTF-8">
-  <meta name="viewport" content="width=device-width,initial-scale=1"/>
+  <meta charset="UTF-8" />
+  <title>Invoice for order ${orderId} - ${BRAND_NAME}</title>
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
   <style type="text/css">
+    /* Email-safe Montserrat import */
     @import url('https://fonts.googleapis.com/css2?family=Montserrat:wght@400;500;600;700&display=swap');
+
+    body {
+      margin: 0;
+      padding: 0;
+      background: ${BG};
+      font-family: 'Montserrat', -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
+    }
+
+    .wrapper {
+      width: 100%;
+      background: ${BG};
+      padding: 32px 12px;
+    }
+
+    .card {
+      max-width: 640px;
+      margin: 0 auto;
+      background: ${CARD_BG};
+      border-radius: 12px;
+      box-shadow: 0 4px 20px rgba(0,0,0,0.06);
+      overflow: hidden;
+      border: 1px solid #e5e7eb;
+    }
+
+    .card-header {
+      padding: 20px 32px 16px;
+      border-bottom: 1px solid ${BORDER};
+      text-align: left;
+    }
+
+    .brand-row {
+      display: flex;
+      align-items: center;
+      gap: 12px;
+      margin-bottom: 12px;
+    }
+
+    .brand-logo {
+      display: inline-block;
+      height: 32px;
+    }
+
+    .brand-text {
+      font-weight: 600;
+      font-size: 18px;
+      letter-spacing: .06em;
+      text-transform: uppercase;
+      color: ${BRAND_COLOR};
+    }
+
+    .muted {
+      color: ${MUTED};
+      font-size: 13px;
+    }
+
+    .section-title {
+      font-size: 14px;
+      font-weight: 600;
+      margin: 0 0 6px;
+      color: #111827;
+    }
+
+    .pill {
+      display: inline-block;
+      padding: 6px 10px;
+      border-radius: 999px;
+      background: #f3f4f6;
+      font-size: 11px;
+      color: ${MUTED};
+    }
+
+    .order-meta {
+      font-size: 12px;
+      color: ${MUTED};
+      margin-top: 4px;
+    }
+
+    .card-body {
+      padding: 8px 32px 24px;
+    }
+
+    .items-table {
+      width: 100%;
+      border-collapse: collapse;
+      margin-top: 12px;
+      border-radius: 8px;
+      overflow: hidden;
+      border: 1px solid ${BORDER};
+    }
+
+    .items-table thead {
+      background: #f9fafb;
+    }
+
+    .items-table th,
+    .items-table td {
+      padding: 10px 12px;
+      font-size: 13px;
+      text-align: left;
+    }
+
+    .items-table th {
+      font-weight: 600;
+      color: #111827;
+      border-bottom: 1px solid ${BORDER};
+    }
+
+    .items-table td {
+      border-bottom: 1px solid #f3f4f6;
+      vertical-align: top;
+    }
+
+    .items-table tr:last-child td {
+      border-bottom: none;
+    }
+
+    .item-name {
+      font-weight: 500;
+      color: #111827;
+    }
+
+    .item-sub {
+      font-size: 11px;
+      color: ${MUTED};
+    }
+
+    .totals {
+      margin-top: 16px;
+      width: 100%;
+      font-size: 13px;
+    }
+
+    .totals-row {
+      display: flex;
+      justify-content: space-between;
+      margin-top: 4px;
+    }
+
+    .totals-row strong {
+      font-weight: 600;
+    }
+
+    .total-amount {
+      font-size: 15px;
+      font-weight: 700;
+      color: #111827;
+    }
+
+    .info-grid {
+      display: grid;
+      grid-template-columns: repeat(auto-fit,minmax(220px,1fr));
+      gap: 12px;
+      margin-top: 20px;
+    }
+
+    .info-box {
+      border-radius: 8px;
+      border: 1px solid ${BORDER};
+      padding: 10px 12px;
+    }
+
+    .info-label {
+      font-size: 11px;
+      font-weight: 600;
+      color: ${MUTED};
+      text-transform: uppercase;
+      letter-spacing: .06em;
+      margin-bottom: 4px;
+    }
+
+    .info-value {
+      font-size: 13px;
+      color: #111827;
+    }
+
+    .footer {
+      text-align: center;
+      padding: 14px 20px 18px;
+      font-size: 11px;
+      color: ${MUTED};
+      border-top: 1px solid ${BORDER};
+      background: #f9fafb;
+    }
+
+    @media (max-width: 600px) {
+      .card {
+        border-radius: 0;
+      }
+      .card-header,
+      .card-body {
+        padding-left: 16px;
+        padding-right: 16px;
+      }
+    }
   </style>
 </head>
-<body style="margin:0;background:#f3f4f6;font-family:${BRAND_FONT_STACK};">
-  <table role="presentation" width="100%" cellspacing="0" cellpadding="0" style="background:#f3f4f6;">
-    <tr>
-      <td align="center" style="padding:24px 12px;">
-        <table role="presentation" width="640" cellspacing="0" cellpadding="0" style="max-width:640px;background:#fff;border-radius:8px;overflow:hidden;box-shadow:0 2px 8px rgba(0,0,0,.05);">
-          <!-- Header -->
-          <tr>
-            <td style="padding:18px 22px;background:#ffffff;border-bottom:1px solid #e5e7eb;">
-              <img
-                src="${RECEIPT_LOGO}"
-                alt="${BRAND_NAME} logo"
-                width="150"
-                style="display:inline-block;max-width:180px;height:auto;border:0;line-height:100%;outline:none;text-decoration:none;"
-              />
-            </td>
-          </tr>
+<body>
+  <div class="wrapper">
+    <div class="card">
+      <div class="card-header">
+        <div class="brand-row">
+          <img src="/Marobi_Logo.svg" alt="${BRAND_NAME} logo" class="brand-logo" />
+          <span class="brand-text">${BRAND_NAME}</span>
+        </div>
+        <div>
+          <p class="section-title">Thanks for your order</p>
+          <p class="muted">
+            Your order has been packed and will be picked up by a courier soon.
+          </p>
+          <div style="margin-top:10px;">
+            <span class="pill">ORDER ${orderId || ""} (${orderDate || ""})</span>
+          </div>
+          <div class="order-meta">
+            <span>Payment method: ${paymentMethod}</span>
+          </div>
+        </div>
+      </div>
 
-          <!-- Intro + Order -->
-          <tr>
-            <td style="padding:16px 22px 0;font-family:${BRAND_FONT_STACK};">
-              <div style="font-size:16px;font-weight:700;color:#111827;margin-bottom:6px;font-family:${BRAND_FONT_STACK};">Thanks for your order</div>
-              <div style="font-size:13px;color:#374151;line-height:1.6;font-family:${BRAND_FONT_STACK};">Your order has been packed and would be picked up by a courier soon.</div>
-              <div style="margin-top:14px;padding:10px 12px;background:#f9fafb;border:1px solid #e5e7eb;border-radius:6px;font-size:12px;color:#374151;font-family:${BRAND_FONT_STACK};">
-                <strong>ORDER ${order.id}</strong> (${orderDate})
-              </div>
-            </td>
-          </tr>
+      <div class="card-body">
+        <table class="items-table" role="presentation">
+          <thead>
+            <tr>
+              <th style="width: 55%;">Product</th>
+              <th style="width: 15%;">Quantity</th>
+              <th style="width: 30%; text-align:right;">Price</th>
+            </tr>
+          </thead>
+          <tbody>
+            ${items
+              .map((it: any) => {
+                const parts: string[] = [];
+                if (it?.color) parts.push(`Color: ${it.color}`);
+                if (it?.size) parts.push(`Size: ${it.size}`);
+                const sub = parts.join(" • ");
+                const lineTotal = moneyLabel(currency, it?.lineTotal ?? 0);
 
-          <!-- Items -->
-          <tr>
-            <td style="padding:12px 22px;font-family:${BRAND_FONT_STACK};">
-              <table role="presentation" width="100%" cellspacing="0" cellpadding="0" style="border:1px solid #e5e7eb;border-radius:8px;overflow:hidden;">
-                <thead>
-                  <tr style="background:#f9fafb">
-                    <th align="left"  style="font-size:12px;color:#6b7280;padding:10px 12px;font-family:${BRAND_FONT_STACK};">Product</th>
-                    <th align="center" style="font-size:12px;color:#6b7280;padding:10px 12px;font-family:${BRAND_FONT_STACK};">Quantity</th>
-                    <th align="right" style="font-size:12px;color:#6b7280;padding:10px 12px;font-family:${BRAND_FONT_STACK};">Price</th>
+                const sizeModLine =
+                  it?.hasSizeMod && it?.sizeModFee
+                    ? `<div class="item-sub" style="color:#92400e;">+5% size-mod fee included</div>`
+                    : "";
+
+                return `
+                  <tr>
+                    <td>
+                      <div class="item-name">${it?.name || ""}</div>
+                      ${sub ? `<div class="item-sub">${sub}</div>` : ""}
+                      ${sizeModLine}
+                    </td>
+                    <td>${it?.quantity ?? ""}</td>
+                    <td style="text-align:right;">${lineTotal}</td>
                   </tr>
-                </thead>
-                <tbody>${rows}</tbody>
-              </table>
-            </td>
-          </tr>
-
-          <!-- Totals -->
-          <tr>
-            <td style="padding:6px 22px 0;font-family:${BRAND_FONT_STACK};">
-              <table role="presentation" width="100%" cellspacing="0" cellpadding="0" style="border:1px solid #e5e7eb;border-radius:8px;">
-                <tr>
-                  <td style="padding:10px 12px;font-size:13px;color:#111827;font-family:${BRAND_FONT_STACK};">Subtotal</td>
-                  <td align="right" style="padding:10px 12px;font-size:13px;color:#111827;font-family:${BRAND_FONT_STACK};">${sym}${subtotal.toLocaleString()}</td>
-                </tr>
-                <tr style="background:#fafafa">
-                  <td style="padding:10px 12px;font-size:13px;color:#111827;font-family:${BRAND_FONT_STACK};">Shipping</td>
-                  <td align="right" style="padding:10px 12px;font-size:13px;color:#111827;font-family:${BRAND_FONT_STACK};">${sym}${shippingFee.toLocaleString()}</td>
-                </tr>
-                <tr>
-                  <td style="padding:12px 12px;font-size:14px;font-weight:700;color:#111827;border-top:1px solid #e5e7eb;font-family:${BRAND_FONT_STACK};">Total</td>
-                  <td align="right" style="padding:12px 12px;font-size:14px;font-weight:700;color:#111827;border-top:1px solid #e5e7eb;font-family:${BRAND_FONT_STACK};">${sym}${total.toLocaleString()}</td>
-                </tr>
-              </table>
-            </td>
-          </tr>
-
-          <!-- Delivery meta (Courier • ETA • Weight) -->
-          <tr>
-            <td style="padding:10px 22px 0;font-family:${BRAND_FONT_STACK};">
-              <table role="presentation" width="100%" cellspacing="0" cellpadding="0" style="border:1px solid #e5e7eb;border-radius:8px;">
-                <tr style="background:#f9fafb">
-                  <td colspan="2" style="padding:10px 12px;font-size:12px;font-weight:700;color:#374151;font-family:${BRAND_FONT_STACK};">DELIVERY</td>
-                </tr>
-                <tr>
-                  <td style="padding:10px 12px;font-size:13px;color:#111827;font-family:${BRAND_FONT_STACK};">Courier</td>
-                  <td align="right" style="padding:10px 12px;font-size:13px;color:#111827;font-family:${BRAND_FONT_STACK};">${shipping?.courierName ?? "—"}</td>
-                </tr>
-                ${
-                  eta
-                    ? `<tr style="background:#fafafa">
-                         <td style="padding:10px 12px;font-size:13px;color:#111827;font-family:${BRAND_FONT_STACK};">ETA</td>
-                         <td align="right" style="padding:10px 12px;font-size:13px;color:#111827;font-family:${BRAND_FONT_STACK};">${eta}</td>
-                       </tr>`
-                    : ""
-                }
-                ${
-                  weight
-                    ? `<tr>
-                         <td style="padding:10px 12px;font-size:13px;color:#111827;font-family:${BRAND_FONT_STACK};">Weight</td>
-                         <td align="right" style="padding:10px 12px;font-size:13px;color:#111827;font-family:${BRAND_FONT_STACK};">${weight}</td>
-                       </tr>`
-                    : ""
-                }
-              </table>
-            </td>
-          </tr>
-
-          <!-- Addresses -->
-          <tr>
-            <td style="padding:16px 22px;font-family:${BRAND_FONT_STACK};">
-              <table role="presentation" width="100%" cellspacing="0" cellpadding="0">
-                <tr>
-                  <td valign="top" style="width:50%;padding-right:10px;">
-                    <div style="background:#f9fafb;border:1px solid #e5e7eb;border-radius:8px;padding:12px;">
-                      <div style="font-size:12px;font-weight:700;color:#374151;margin-bottom:6px;font-family:${BRAND_FONT_STACK};">BILLING ADDRESS</div>
-                      <div style="font-size:12px;color:#111827;white-space:pre-line;font-family:${BRAND_FONT_STACK};">
-                        ${name}
-                        ${recipient.billingAddress ? `\n${recipient.billingAddress}` : ""}
-                        ${recipient.email ? `\n${recipient.email}` : ""}
-                      </div>
-                    </div>
-                  </td>
-                  <td valign="top" style="width:50%;padding-left:10px;">
-                    <div style="background:#f9fafb;border:1px solid #e5e7eb;border-radius:8px;padding:12px;">
-                      <div style="font-size:12px;font-weight:700;color:#374151;margin-bottom:6px;font-family:${BRAND_FONT_STACK};">SHIPPING ADDRESS</div>
-                      <div style="font-size:12px;color:#111827;white-space:pre-line;font-family:${BRAND_FONT_STACK};">
-                        ${name}
-                        ${recipient.deliveryAddress ? `\n${recipient.deliveryAddress}` : ""}
-                        ${recipient.email ? `\n${recipient.email}` : ""}
-                      </div>
-                    </div>
-                  </td>
-                </tr>
-              </table>
-            </td>
-          </tr>
-
-          <!-- Footer -->
-          <tr>
-            <td style="padding:16px 22px;border-top:1px solid #e5e7eb;background:#fafafa;font-size:12px;color:#6b7280;text-align:center;font-family:${BRAND_FONT_STACK};">
-              Thanks for shopping with ${BRAND_NAME}.
-            </td>
-          </tr>
+                `;
+              })
+              .join("")}
+          </tbody>
         </table>
-        <div style="height:20px">&nbsp;</div>
-      </td>
-    </tr>
-  </table>
+
+        <div class="totals">
+          <div class="totals-row">
+            <span>Subtotal</span>
+            <span>${symbolSubtotal}</span>
+          </div>
+          <div class="totals-row">
+            <span>Shipping</span>
+            <span>${symbolShipping}</span>
+          </div>
+          <div class="totals-row" style="margin-top:6px;">
+            <span><strong>Total</strong></span>
+            <span class="total-amount">${symbolTotal}</span>
+          </div>
+        </div>
+
+        <div class="info-grid">
+          <div class="info-box">
+            <div class="info-label">Delivery</div>
+            <div class="info-value">
+              <div>Courier</div>
+              <div style="margin-top:2px;color:${MUTED};font-size:12px;">
+                ${courierDisplay}
+              </div>
+            </div>
+          </div>
+
+          <div class="info-box">
+            <div class="info-label">Billing Address</div>
+            <div class="info-value">
+              <div>${name || ""}</div>
+              ${
+                recipient.billingAddress
+                  ? `<div style="margin-top:2px;">${recipient.billingAddress}</div>`
+                  : ""
+              }
+              <div style="margin-top:2px;color:${MUTED};font-size:12px;">
+                ${recipient.email || ""}
+              </div>
+            </div>
+          </div>
+
+          <div class="info-box">
+            <div class="info-label">Shipping Address</div>
+            <div class="info-value">
+              <div>${name || ""}</div>
+              ${
+                recipient.deliveryAddress
+                  ? `<div style="margin-top:2px;">${recipient.deliveryAddress}</div>`
+                  : ""
+              }
+              <div style="margin-top:2px;color:${MUTED};font-size:12px;">
+                ${recipient.email || ""}
+              </div>
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <div class="footer">
+        Thanks for shopping with ${BRAND_NAME}.
+      </div>
+    </div>
+  </div>
 </body>
 </html>`;
 }
