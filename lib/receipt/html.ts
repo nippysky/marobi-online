@@ -31,12 +31,25 @@ interface RenderReceiptArgs {
   recipient: Recipient;
   currency: string; // "NGN" | "USD" | ...
   deliveryFee: number;
+  /**
+   * Optional asset base URL for absolute paths in emails.
+   * E.g. https://marobionline.com
+   */
+  assetBaseUrl?: string;
 }
 
 function moneyLabel(currency: string, amount: number): string {
   const c = (currency || "NGN").toUpperCase();
   const symbol =
-    c === "NGN" ? "₦" : c === "USD" ? "$" : c === "EUR" ? "€" : c === "GBP" ? "£" : "";
+    c === "NGN"
+      ? "₦"
+      : c === "USD"
+      ? "$"
+      : c === "EUR"
+      ? "€"
+      : c === "GBP"
+      ? "£"
+      : "";
   const formatted = Number(amount || 0).toLocaleString();
   if (!symbol && c === "NGN") return `NGN ${formatted}`;
   if (!symbol) return `${c} ${formatted}`;
@@ -51,23 +64,50 @@ function safeDate(d: string | Date): string {
   }
 }
 
+/**
+ * Some DB drivers / ORMs may store JSON as a string.
+ * This helper makes sure we always get an object.
+ */
+function parseDeliveryDetails(raw: any): any {
+  if (!raw) return {};
+  if (typeof raw === "string") {
+    try {
+      return JSON.parse(raw);
+    } catch {
+      return {};
+    }
+  }
+  return raw;
+}
+
+/**
+ * Extract courier name from:
+ *  - deliveryDetails.shipbubble.courierName
+ *  - deliveryDetails.shipbubble.courier_name
+ *  - deliveryDetails.courierName / courier_name
+ *  - order.deliveryOption.name
+ */
 function getCourierName(order: AnyOrder): string | null {
-  const details = (order?.deliveryDetails as any) || {};
-  const shipbubble = details?.shipbubble || {};
+  const details = parseDeliveryDetails(order?.deliveryDetails);
 
-  // 1) Shipbubble courier name (used for your current flow: GIG Logistics, Fez, etc.)
-  if (typeof shipbubble.courierName === "string" && shipbubble.courierName.trim()) {
-    return shipbubble.courierName.trim();
-  }
+  const shipbubble =
+    details?.shipbubble ||
+    details?.shipping?.shipbubble ||
+    {};
 
-  // 2) Fallback: deliveryOption relation (traditional delivery options)
-  if (order?.deliveryOption?.name) {
-    return String(order.deliveryOption.name);
-  }
+  const candidates: any[] = [
+    shipbubble.courierName,
+    shipbubble.courier_name,
+    shipbubble.courier,
+    order?.deliveryOption?.name,
+    details.courierName,
+    details.courier_name,
+  ];
 
-  // 3) Fallback: generic courierName on deliveryDetails, if you ever store it there
-  if (typeof details.courierName === "string" && details.courierName.trim()) {
-    return details.courierName.trim();
+  for (const candidate of candidates) {
+    if (typeof candidate === "string" && candidate.trim()) {
+      return candidate.trim();
+    }
   }
 
   return null;
@@ -78,6 +118,7 @@ export function renderReceiptHTML({
   recipient,
   currency,
   deliveryFee,
+  assetBaseUrl,
 }: RenderReceiptArgs): string {
   const name = `${recipient.firstName || ""} ${recipient.lastName || ""}`.trim();
   const subtotal = Number(order.totalAmount ?? 0);
@@ -96,6 +137,11 @@ export function renderReceiptHTML({
   const paymentMethod = order.paymentMethod || "—";
 
   const items = Array.isArray(order.items) ? order.items : [];
+
+  // Absolute URL for emails when assetBaseUrl is provided
+  const logoSrc = assetBaseUrl
+    ? `${assetBaseUrl}/Marobi_Logo.svg`
+    : "/Marobi_Logo.svg";
 
   return `<!DOCTYPE html>
 <html lang="en">
@@ -307,7 +353,7 @@ export function renderReceiptHTML({
     <div class="card">
       <div class="card-header">
         <div class="brand-row">
-          <img src="/Marobi_Logo.svg" alt="${BRAND_NAME} logo" class="brand-logo" />
+          <img src="${logoSrc}" alt="${BRAND_NAME} logo" class="brand-logo" />
           <span class="brand-text">${BRAND_NAME}</span>
         </div>
         <div>
