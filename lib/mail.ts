@@ -20,7 +20,7 @@
 // OPTIONAL (SMTP envelope sender override; defaults to EMAIL_INFO):
 //   EMAIL_ENVELOPE_FROM=info@marobionline.com
 //
-// OPTIONAL (base URL used for logo URLs in emails):
+// OPTIONAL (base URL used for logo + font URLs in emails):
 //   NEXT_PUBLIC_APP_URL=https://marobionline.com
 //   or fallback to NEXTAUTH_URL / https://marobionline.com
 
@@ -40,11 +40,7 @@ const TEXT_COLOR = "#111827";
 const MUTED_COLOR = "#6b7280";
 const BORDER_RADIUS = "8px";
 
-// Email-safe font stack (Montserrat first, then system fallbacks)
-const BRAND_FONT_STACK =
-  "'Montserrat', -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif";
-
-// Where to host assets for emails (logos, etc.)
+// Where to host assets for emails (logos, fonts, etc.)
 function getAppBaseUrl(): string {
   const explicit =
     process.env.NEXT_PUBLIC_APP_URL ||
@@ -57,10 +53,29 @@ function getAppBaseUrl(): string {
 
 const APP_BASE_URL = getAppBaseUrl();
 
-// Green logo for light backgrounds
-const BRAND_LOGO_DARK_BG = `${APP_BASE_URL}/Marobi_Logo_White.svg`;
-// Green logo (optional) for light email bodies or sections if you need it later
-const BRAND_LOGO_LIGHT_BG = `${APP_BASE_URL}/Marobi_Logo.svg`;
+// Local Montserrat font-face (served from /public/fonts)
+const FONT_FACE_CSS = `
+@font-face {
+  font-family: 'MarobiMontserrat';
+  src: url('${APP_BASE_URL}/fonts/Montserrat-Regular.ttf') format('truetype');
+  font-weight: 400;
+  font-style: normal;
+}
+@font-face {
+  font-family: 'MarobiMontserrat';
+  src: url('${APP_BASE_URL}/fonts/Montserrat-Bold.ttf') format('truetype');
+  font-weight: 700;
+  font-style: normal;
+}
+`;
+
+// Email-safe font stack (brand font first, then system fallbacks)
+const BRAND_FONT_STACK =
+  "'MarobiMontserrat', 'Montserrat', -apple-system, BlinkMacSystemFont, 'Segoe UI', system-ui, sans-serif";
+
+// Logos
+const BRAND_LOGO_DARK_BG = `${APP_BASE_URL}/Marobi_Logo_White.svg`; // for green header
+const BRAND_LOGO_LIGHT_BG = `${APP_BASE_URL}/Marobi_Logo.svg`; // (unused for now but kept)
 
 /* ---------- SMTP Transporter ---------- */
 
@@ -111,8 +126,7 @@ const FROM_NO_REPLY =
   process.env.EMAIL_FROM_NO_REPLY || `Marobi <${EMAIL_NO_REPLY}>`;
 const FROM_SHIPPING =
   process.env.EMAIL_FROM_SHIPPING || `Marobi Shipping <${EMAIL_SHIPPING}>`;
-const FROM_INFO =
-  process.env.EMAIL_FROM_INFO || `Marobi <${EMAIL_INFO}>`;
+const FROM_INFO = process.env.EMAIL_FROM_INFO || `Marobi <${EMAIL_INFO}>`;
 
 const ENVELOPE_FROM = (
   process.env.EMAIL_ENVELOPE_FROM?.trim() || EMAIL_INFO
@@ -273,8 +287,13 @@ export function renderEmail(opts: RenderEmailOptions): string {
 <title>${title} - ${BRAND_NAME}</title>
 <meta name="viewport" content="width=device-width,initial-scale=1" />
 <style type="text/css">
-  /* Montserrat brand font – supported in most modern clients */
-  @import url('https://fonts.googleapis.com/css2?family=Montserrat:wght@400;500;600;700&display=swap');
+  ${FONT_FACE_CSS}
+  body {
+    margin: 0;
+    padding: 0;
+    background: ${BG_OUTER};
+    font-family: ${BRAND_FONT_STACK};
+  }
 </style>
 </head>
 <body style="margin:0;padding:0;background:${BG_OUTER};font-family:${BRAND_FONT_STACK};">
@@ -547,9 +566,6 @@ export async function sendReceiptEmailWithRetry({
     throw new Error("[sendReceiptEmailWithRetry] invalid recipient email");
   }
 
-  // NOTE: renderReceiptHTML is a shared renderer used on web + email.
-  // It should already (or can be updated to) use Montserrat + the logo
-  // inside its own template. We keep that logic in its own module.
   const html = renderReceiptHTML({
     order,
     recipient,

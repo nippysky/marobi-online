@@ -5,88 +5,9 @@ import fs from "fs";
 import path from "path";
 
 /**
- * Brand-aligned invoice PDF as Buffer.
- * Mirrors the email/receipt design and includes size-mod fee + custom measurements.
- *
- * Fonts:
- *   - If you place Montserrat TTF files in either:
- *       /public/fonts   or   /lib/pdf/fonts
- *     with names:
- *       Montserrat-Regular.ttf
- *       Montserrat-Bold.ttf
- *     the PDF will use them.
- *   - Otherwise falls back to Helvetica.
- *
- * Logo:
- *   - Tries to load a PNG logo from /public:
- *       Marobi_Logo_White.png
- *       Marobi_Logo.png
- *       Marobi_Icon.png
- *       android-chrome-192x192.png
- *     and uses the first one found.
- *   - If none exist, falls back to a text “Marobi” header.
- */
-
-function findLogoPath(): string | null {
-  const candidates = [
-    "Marobi_Logo.png",
-    "Marobi_Logo_White.png",
-    "Marobi_Icon.png",
-    "android-chrome-192x192.png",
-  ];
-
-  for (const name of candidates) {
-    const full = path.join(process.cwd(), "public", name);
-    if (fs.existsSync(full)) {
-      return full;
-    }
-  }
-
-  return null;
-}
-
-function registerFonts(doc: InstanceType<typeof PDFDocument>): { bodyFont: string; boldFont: string } {
-  // Try Montserrat first, then some common fallbacks.
-  const fontPairs: [string, string][] = [
-    ["Montserrat-Regular.ttf", "Montserrat-Bold.ttf"],
-    ["NotoSans-Regular.ttf", "NotoSans-Bold.ttf"],
-    ["Inter-Regular.ttf", "Inter-Bold.ttf"],
-    ["Roboto-Regular.ttf", "Roboto-Bold.ttf"],
-  ];
-
-  const roots = [
-    path.join(process.cwd(), "public", "fonts"),
-    path.join(process.cwd(), "lib", "pdf", "fonts"),
-  ];
-
-  let bodyFont = "Helvetica";
-  let boldFont = "Helvetica-Bold";
-
-  outer: for (const [reg, bold] of fontPairs) {
-    for (const root of roots) {
-      const r = path.join(root, reg);
-      const b = path.join(root, bold);
-      if (fs.existsSync(r) && fs.existsSync(b)) {
-        try {
-          const regBuf = fs.readFileSync(r);
-          const boldBuf = fs.readFileSync(b);
-          doc.registerFont("Body", regBuf);
-          doc.registerFont("Bold", boldBuf);
-          bodyFont = "Body";
-          boldFont = "Bold";
-          break outer;
-        } catch {
-          // If anything fails, just continue and fall back to Helvetica.
-        }
-      }
-    }
-  }
-
-  return { bodyFont, boldFont };
-}
-
-/**
- * Teeka-style invoice PDF as Buffer.
+ * Marobi invoice PDF as Buffer.
+ * Mirrors the receipt design, including size-mod fee + custom measurements.
+ * Uses Montserrat if present under public/fonts.
  */
 export async function generateInvoicePDF({
   order,
@@ -123,24 +44,34 @@ export async function generateInvoicePDF({
 }): Promise<Buffer> {
   const doc = new PDFDocument({ size: "A4", margin: 36, bufferPages: true });
 
-  const { bodyFont, boldFont } = registerFonts(doc);
-  const logoPath = findLogoPath();
+  // --- Fonts: Montserrat from /public/fonts, with fallback to Helvetica ---
+  const fontsRoot = path.join(process.cwd(), "public", "fonts");
+  const regularPath = path.join(fontsRoot, "Montserrat-Regular.ttf");
+  const boldPath = path.join(fontsRoot, "Montserrat-Bold.ttf");
+
+  let bodyFont = "Helvetica";
+  let boldFont = "Helvetica-Bold";
+
+  try {
+    if (fs.existsSync(regularPath) && fs.existsSync(boldPath)) {
+      const regularBytes = fs.readFileSync(regularPath);
+      const boldBytes = fs.readFileSync(boldPath);
+
+      doc.registerFont("MarobiBody", regularBytes);
+      doc.registerFont("MarobiBold", boldBytes);
+
+      bodyFont = "MarobiBody";
+      boldFont = "MarobiBold";
+    }
+  } catch {
+    // ignore font load errors, fallback to Helvetica
+  }
 
   const symbol =
-    currency === "NGN"
-      ? "₦"
-      : currency === "USD"
-      ? "$"
-      : currency === "EUR"
-      ? "€"
-      : "£";
-
-  // If we’re stuck on Helvetica and need ₦, fall back to "NGN "
+    currency === "NGN" ? "₦" : currency === "USD" ? "$" : currency === "EUR" ? "€" : "£";
   const currencyLabel =
     bodyFont === "Helvetica" && symbol === "₦" ? "NGN " : symbol;
-
-  const money = (n: number) =>
-    `${currencyLabel}${Number(n).toLocaleString()}`;
+  const money = (n: number) => `${currencyLabel}${Number(n).toLocaleString()}`;
 
   const subtotal = Number(order.totalAmount ?? 0);
   const shipping = Number(deliveryFee ?? 0);
@@ -155,10 +86,11 @@ export async function generateInvoicePDF({
 
   const margin = doc.page.margins.left;
 
-  /* ---------- Header (logo + meta + QR) ---------- */
+  // --- Header: logo + invoice meta ---
+  const logoPathPng = path.join(process.cwd(), "public", "Marobi_Logo.png");
 
-  if (logoPath) {
-    doc.image(logoPath, margin, margin, { height: 32 });
+  if (fs.existsSync(logoPathPng)) {
+    doc.image(logoPathPng, margin, margin - 4, { height: 26 });
   } else {
     doc
       .font(boldFont)
@@ -174,12 +106,10 @@ export async function generateInvoicePDF({
     .font(bodyFont)
     .fontSize(10)
     .fillColor("#111")
-    .text(
-      `Invoice Number:  ${order.id}`,
-      rightX,
-      margin,
-      { width: rightBoxWidth, align: "right" }
-    )
+    .text(`Invoice Number:  ${order.id}`, rightX, margin, {
+      width: rightBoxWidth,
+      align: "right",
+    })
     .text(
       `Order Date:     ${new Date(order.createdAt).toLocaleDateString()}`,
       rightX,
@@ -193,15 +123,13 @@ export async function generateInvoicePDF({
       { width: rightBoxWidth, align: "right" }
     );
 
+  // Embed QR of order id (nice pro touch)
   try {
-    const qrDataURL = await QRCode.toDataURL(order.id, {
-      margin: 0,
-      width: 72,
-    });
+    const qrDataURL = await QRCode.toDataURL(order.id, { margin: 0, width: 72 });
     const buf = Buffer.from(qrDataURL.split(",")[1], "base64");
     doc.image(buf, rightX + rightBoxWidth - 72, margin - 6, { width: 72 });
   } catch {
-    // QR is nice-to-have; ignore failures.
+    // ignore QR errors
   }
 
   doc
@@ -212,7 +140,6 @@ export async function generateInvoicePDF({
     .text("INVOICE", margin, 110);
 
   const name = `${recipient.firstName} ${recipient.lastName}`.trim();
-
   doc
     .font(bodyFont)
     .fontSize(11)
@@ -222,10 +149,8 @@ export async function generateInvoicePDF({
     .text(name, margin, 154)
     .font(bodyFont)
     .text(recipient.email || "", { width: 260 });
-
-  if (recipient.billingAddress) {
+  if (recipient.billingAddress)
     doc.moveDown(0.4).text(recipient.billingAddress, { width: 260 });
-  }
 
   doc
     .font(bodyFont)
@@ -235,17 +160,10 @@ export async function generateInvoicePDF({
     .font(boldFont)
     .text(name, margin + 300, 154)
     .font(bodyFont);
+  if (recipient.deliveryAddress)
+    doc.moveDown(0.4).text(recipient.deliveryAddress, { width: 260 });
 
-  if (recipient.deliveryAddress) {
-    doc
-      .moveDown(0.4)
-      .text(recipient.deliveryAddress, {
-        width: 260,
-      });
-  }
-
-  /* ---------- Items table ---------- */
-
+  // --- Table setup ---
   const priceBoxWidth = 120;
   const priceX = doc.page.width - margin - priceBoxWidth;
   const qtyX = priceX - 80;
@@ -259,10 +177,7 @@ export async function generateInvoicePDF({
       .fillColor("#111")
       .text("Product", productX, y)
       .text("Quantity", qtyX, y)
-      .text("Price", priceX, y, {
-        width: priceBoxWidth,
-        align: "right",
-      })
+      .text("Price", priceX, y, { width: priceBoxWidth, align: "right" })
       .font(bodyFont);
     y += 18;
     doc
@@ -288,7 +203,6 @@ export async function generateInvoicePDF({
     const rowHeight = 44;
 
     ensureSpace(rowHeight + 18);
-
     doc
       .rect(margin, y - 6, doc.page.width - margin * 2, rowHeight)
       .fillAndStroke(rowBG, rowBG);
@@ -304,7 +218,6 @@ export async function generateInvoicePDF({
     const subParts: string[] = [];
     if (it.color) subParts.push(`Color: ${it.color}`);
     subParts.push(`Size: ${it.hasSizeMod ? "Custom" : it.size ?? "—"}`);
-
     doc
       .fillColor("#6b7280")
       .fontSize(9)
@@ -358,8 +271,7 @@ export async function generateInvoicePDF({
     y += rowHeight + 6;
   });
 
-  /* ---------- Totals ---------- */
-
+  // --- Totals ---
   ensureSpace(110);
   y += 8;
   doc
@@ -370,10 +282,9 @@ export async function generateInvoicePDF({
   y += 10;
 
   const labelX = qtyX - 40;
-
-  const row = (label: string, value: number | string, bold = false) => {
+  const row = (label: string, value: number | string, isBold = false) => {
     doc
-      .font(bold ? boldFont : bodyFont)
+      .font(isBold ? boldFont : bodyFont)
       .fontSize(11)
       .fillColor("#111")
       .text(label, labelX, y, {
@@ -392,8 +303,6 @@ export async function generateInvoicePDF({
   row("Subtotal:", subtotal);
   row("Shipping:", shipping);
   row("Total:", total, true);
-
-  /* ---------- Footer ---------- */
 
   doc
     .font(bodyFont)
