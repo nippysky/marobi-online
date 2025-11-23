@@ -1,4 +1,5 @@
 // app/api/orders/online/route.ts
+export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
 
 import { NextRequest, NextResponse } from "next/server";
@@ -128,8 +129,6 @@ export async function POST(req: NextRequest) {
       shipping?.source === "shipbubble" && !!shipping?.shipbubble;
 
     // --- Validate delivery option (courier-only system) when provided.
-    // If frontend is using Shipbubble (shipping.shipbubble present),
-    // it should NOT send a DB deliveryOptionId; we tolerate either flow.
     if (deliveryOptionId && !isShipbubbleFlow) {
       const deliveryOpt = await prisma.deliveryOption.findUnique({
         where: { id: deliveryOptionId },
@@ -170,7 +169,7 @@ export async function POST(req: NextRequest) {
         });
       }
 
-      // 🔔 NEW: best-effort receipt email even for idempotent/duplicate calls
+      // best-effort receipt email even for idempotent/duplicate calls
       try {
         const fullOrder = await prisma.order.findUnique({
           where: { id: existingOrder.id },
@@ -453,76 +452,86 @@ export async function POST(req: NextRequest) {
     }
 
     // --- Create order & decrement stock atomically
-    const { order } = await prisma.$transaction(async (tx) => {
-      // Revalidate & decrement stock
-      for (const i of items) {
-        const where: Record<string, any> = { productId: i.productId };
-        if (i.color && i.color !== "N/A") where.color = i.color;
-        if (i.size && i.size !== "N/A") where.size = i.size;
+    const { order } = await prisma.$transaction(
+      async (tx) => {
+        // Revalidate & decrement stock
+        for (const i of items) {
+          const where: Record<string, any> = { productId: i.productId };
+          if (i.color && i.color !== "N/A") where.color = i.color;
+          if (i.size && i.size !== "N/A") where.size = i.size;
 
-        const variant = await tx.variant.findFirst({
-          where,
-          include: { product: true },
-        });
-        if (!variant) {
-          throw new Error(
-            `Variant not found during transaction: ${i.productId} ${i.color}/${i.size}`
-          );
+          const variant = await tx.variant.findFirst({
+            where,
+            include: { product: true },
+          });
+          if (!variant) {
+            throw new Error(
+              `Variant not found during transaction: ${i.productId} ${i.color}/${i.size}`
+            );
+          }
+          if (variant.stock < i.quantity) {
+            throw new Error(
+              `Insufficient stock during transaction for ${variant.product.name}`
+            );
+          }
+
+          await tx.variant.update({
+            where: { id: variant.id },
+            data: { stock: { decrement: i.quantity } },
+          });
         }
-        if (variant.stock < i.quantity) {
-          throw new Error(
-            `Insufficient stock during transaction for ${variant.product.name}`
-          );
+
+        // Reserve the next serial atomically and format the ID
+        const serial = await tx.orderSerial.create({ data: {} }); // requires migrate+generate
+        const newOrderId = formatOrderIdFromSerial(serial.id);
+
+        const orderData: any = {
+          id: newOrderId,
+          status: OrderStatus.Processing,
+          currency: normalizedCurrency as CurrencyEnum,
+          totalAmount: itemsSubtotal, // items only
+          totalNGN: Math.round(totalNGN),
+          paymentMethod,
+          paymentReference,
+          paymentProviderId: String(paystackTx.id),
+          paymentVerified: true,
+          createdAt: timestamp ? new Date(timestamp) : new Date(),
+          items: { create: itemsCreateData },
+          channel: OrderChannel.ONLINE,
+          deliveryFee: typeof deliveryFee === "number" ? deliveryFee : 0,
+          deliveryDetails: deliveryDetailsData,
+          ...(deliveryOptionId &&
+            !isShipbubbleFlow && {
+              deliveryOption: { connect: { id: deliveryOptionId } },
+            }),
+        };
+
+        if (customerId) {
+          orderData.customer = { connect: { id: customerId } };
+        } else if (guestInfo) {
+          orderData.guestInfo = guestInfo;
         }
 
-        await tx.variant.update({
-          where: { id: variant.id },
-          data: { stock: { decrement: i.quantity } },
+        const createdOrder = await tx.order.create({
+          data: orderData,
+          include: {
+            items: true,
+            customer: true,
+          },
         });
+
+        return { order: createdOrder };
+      },
+      {
+        // give Prisma more breathing room for the interactive transaction
+        timeout: 15_000,
       }
+    );
 
-      // Reserve the next serial atomically and format the ID
-      const serial = await tx.orderSerial.create({ data: {} }); // requires migrate+generate
-      const newOrderId = formatOrderIdFromSerial(serial.id);
-
-      const orderData: any = {
-        id: newOrderId,
-        status: OrderStatus.Processing,
-        currency: normalizedCurrency as CurrencyEnum,
-        totalAmount: itemsSubtotal, // items only
-        totalNGN: Math.round(totalNGN),
-        paymentMethod,
-        paymentReference,
-        paymentProviderId: String(paystackTx.id),
-        paymentVerified: true,
-        createdAt: timestamp ? new Date(timestamp) : new Date(),
-        items: { create: itemsCreateData },
-        channel: OrderChannel.ONLINE,
-        deliveryFee: typeof deliveryFee === "number" ? deliveryFee : 0,
-        deliveryDetails: deliveryDetailsData,
-        ...(deliveryOptionId &&
-          !isShipbubbleFlow && {
-            deliveryOption: { connect: { id: deliveryOptionId } },
-          }),
-      };
-
-      if (customerId) {
-        orderData.customer = { connect: { id: customerId } };
-      } else if (guestInfo) {
-        orderData.guestInfo = guestInfo;
-      }
-
-      const createdOrder = await tx.order.create({
-        data: orderData,
-        include: {
-          items: true,
-          customer: true,
-        },
-      });
-
-      // Sync saved addresses for logged-in customers (optional)
-      if (customerId && !guestInfo) {
-        await tx.customer.update({
+    // 🔄 Sync saved addresses for logged-in customers AFTER the transaction
+    if (customerId && !guestInfo) {
+      try {
+        await prisma.customer.update({
           where: { id: customerId },
           data: {
             deliveryAddress: customer.deliveryAddress ?? null,
@@ -531,10 +540,13 @@ export async function POST(req: NextRequest) {
             state: customer.state ?? null,
           },
         });
+      } catch (err) {
+        console.warn(
+          "[orders/online] Failed to sync saved addresses for customer",
+          err
+        );
       }
-
-      return { order: createdOrder };
-    });
+    }
 
     // --- Receipt recipient for freshly created order
     const recipient = existingCustomer
