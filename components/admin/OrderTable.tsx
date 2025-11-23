@@ -241,7 +241,7 @@ export default function OrderTable({
     setReceiptOpen(true);
   }
 
-  // 🔧 Normalize OrderRow -> renderer input (now includes shipping meta)
+  // 🔧 Normalize OrderRow -> renderer input (includes shipping meta)
   function toRenderPayload(o: OrderRow) {
     const courierName = o.deliveryOption?.name || undefined;
     const human = humanizeOnClient(o.deliveryDetails);
@@ -274,7 +274,6 @@ export default function OrderTable({
       },
       currency: o.currency as any,
       deliveryFee: o.deliveryFee ?? 0,
-      // supply shipping meta to the shared HTML renderer
       shipping: {
         courierName,
         summary: summary || undefined,
@@ -800,6 +799,8 @@ export default function OrderTable({
                 border: 1px solid #e5e7eb;
                 border-radius: 10px;
                 overflow: hidden;
+                font-family: 'Montserrat', -apple-system, BlinkMacSystemFont,
+                  'Segoe UI', sans-serif;
               }
               .receipt-frame,
               .receipt-frame * {

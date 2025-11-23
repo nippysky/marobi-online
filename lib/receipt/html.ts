@@ -39,6 +39,25 @@ export interface ReceiptShippingMeta {
   summary?: string;
 }
 
+/* ---------- Brand helpers (logo + fonts + base URL) ---------- */
+
+const BRAND_FONT_STACK =
+  "'Montserrat', -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif";
+
+function getAppBaseUrl(): string {
+  const explicit =
+    process.env.NEXT_PUBLIC_APP_URL ||
+    process.env.NEXTAUTH_URL ||
+    "https://marobionline.com";
+
+  return explicit.replace(/\/+$/, "");
+}
+
+const APP_BASE_URL = getAppBaseUrl();
+
+// White-on-green logo for header
+const BRAND_LOGO_DARK_BG = `${APP_BASE_URL}/Marobi_Logo_White.svg`;
+
 function currencySymbol(c: ReceiptCurrency) {
   const up = String(c).toUpperCase();
   if (up === "NGN") return "₦";
@@ -70,12 +89,23 @@ function parseEtaAndWeight(summary?: string) {
   return { eta, weight };
 }
 
+/** Make product images absolute so they also work inside email clients. */
+function resolveAssetUrl(src?: string | null): string | undefined {
+  if (!src) return undefined;
+  const s = String(src).trim();
+  if (!s) return undefined;
+
+  if (/^https?:\/\//i.test(s)) return s;
+  if (s.startsWith("/")) return `${APP_BASE_URL}${s}`;
+  return `${APP_BASE_URL}/${s.replace(/^\/+/, "")}`;
+}
+
 export function renderReceiptHTML({
   order,
   recipient,
   currency,
   deliveryFee,
-  shipping, // NEW: includes courierName + humanized summary
+  shipping, // includes courierName + humanized summary
 }: {
   order: ReceiptOrderForRender;
   recipient: ReceiptRecipient;
@@ -97,17 +127,22 @@ export function renderReceiptHTML({
       const alt = i % 2 === 0 ? "background:#fafafa;" : "";
       const parts: string[] = [];
       if (p.color) parts.push(`Color: ${p.color}`);
-      parts.push(`Size: ${p.hasSizeMod ? "Custom" : (p.size ?? "—")}`);
+      parts.push(`Size: ${p.hasSizeMod ? "Custom" : p.size ?? "—"}`);
 
       const sizeMod =
         p.hasSizeMod && p.sizeModFee
-          ? `<div style="font-size:12px;color:#92400e">+5% size-mod fee: ${sym}${(p.sizeModFee * p.quantity).toLocaleString()}</div>`
+          ? `<div style="font-size:12px;color:#92400e">+5% size-mod fee: ${sym}${(
+              p.sizeModFee * p.quantity
+            ).toLocaleString()}</div>`
           : "";
 
       let custom = "";
       if (p.hasSizeMod && p.customSize && Object.keys(p.customSize).length) {
         const readable = Object.entries(p.customSize)
-          .filter(([_, v]) => v !== null && v !== undefined && String(v).trim() !== "")
+          .filter(
+            ([_, v]) =>
+              v !== null && v !== undefined && String(v).trim() !== ""
+          )
           .map(([k, v]) => `${k}: ${v}`)
           .join(" • ");
         if (readable) {
@@ -115,18 +150,21 @@ export function renderReceiptHTML({
         }
       }
 
+      const imgUrl = resolveAssetUrl(p.image);
+      const imgHtml = imgUrl
+        ? `<img src="${imgUrl}" width="44" height="44" style="object-fit:cover;border-radius:6px;border:1px solid #e5e7eb" />`
+        : "";
+
       return `
       <tr style="${alt}">
         <td style="padding:10px 12px;">
           <div style="display:flex;gap:20px;align-items:flex-start">
-            ${
-              p.image
-                ? `<img src="${p.image}" width="44" height="44" style="object-fit:cover;border-radius:6px;border:1px solid #e5e7eb" />`
-                : ""
-            }
+            ${imgHtml}
             <div style="margin-left: 30px;">
               <div style="font-weight:600;color:#111827">${p.name}</div>
-              <div style="font-size:12px;color:#6b7280;">${parts.join(" • ")}</div>
+              <div style="font-size:12px;color:#6b7280;">${parts.join(
+                " • "
+              )}</div>
               ${sizeMod}
               ${custom}
             </div>
@@ -140,22 +178,33 @@ export function renderReceiptHTML({
 
   return `<!DOCTYPE html>
 <html>
-<head><meta charset="UTF-8"><meta name="viewport" content="width=device-width,initial-scale=1"/></head>
-<body style="margin:0;background:#f3f4f6;font-family:Arial,Helvetica,sans-serif;">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width,initial-scale=1"/>
+  <style type="text/css">
+    @import url('https://fonts.googleapis.com/css2?family=Montserrat:wght@400;500;600;700&display=swap');
+  </style>
+</head>
+<body style="margin:0;background:#f3f4f6;font-family:${BRAND_FONT_STACK};">
   <table role="presentation" width="100%" cellspacing="0" cellpadding="0" style="background:#f3f4f6;">
     <tr>
       <td align="center" style="padding:24px 12px;">
         <table role="presentation" width="640" cellspacing="0" cellpadding="0" style="max-width:640px;background:#fff;border-radius:8px;overflow:hidden;box-shadow:0 2px 8px rgba(0,0,0,.05);">
           <!-- Header -->
           <tr>
-            <td style="padding:18px 22px;background:#043927;color:#fff;">
-              <div style="font-size:22px;font-weight:700;">Marobi</div>
+            <td style="padding:18px 22px;background:#043927;color:#fff;text-align:left;">
+              <img
+                src="${BRAND_LOGO_DARK_BG}"
+                alt="Marobi logo"
+                width="140"
+                style="display:inline-block;max-width:180px;height:auto;border:0;line-height:100%;outline:none;text-decoration:none;"
+              />
             </td>
           </tr>
 
           <!-- Intro + Order -->
           <tr>
-            <td style="padding:16px 22px 0;">
+            <td style="padding:16px 22px 0;font-family:${BRAND_FONT_STACK};">
               <div style="font-size:16px;font-weight:700;color:#111827;margin-bottom:6px;">Thanks for your order</div>
               <div style="font-size:13px;color:#374151;line-height:1.6;">Your order has been packed and would be picked up by a courier soon.</div>
               <div style="margin-top:14px;padding:10px 12px;background:#f9fafb;border:1px solid #e5e7eb;border-radius:6px;font-size:12px;color:#374151">
@@ -166,13 +215,13 @@ export function renderReceiptHTML({
 
           <!-- Items -->
           <tr>
-            <td style="padding:12px 22px;">
+            <td style="padding:12px 22px;font-family:${BRAND_FONT_STACK};">
               <table role="presentation" width="100%" cellspacing="0" cellpadding="0" style="border:1px solid #e5e7eb;border-radius:8px;overflow:hidden;">
                 <thead>
                   <tr style="background:#f9fafb">
-                    <th align="left"  style="font-size:12px;color:#6b7280;padding:10px 12px;">Product</th>
-                    <th align="center" style="font-size:12px;color:#6b7280;padding:10px 12px;">Quantity</th>
-                    <th align="right" style="font-size:12px;color:#6b7280;padding:10px 12px;">Price</th>
+                    <th align="left"  style="font-size:12px;color:#6b7280;padding:10px 12px;font-family:${BRAND_FONT_STACK};">Product</th>
+                    <th align="center" style="font-size:12px;color:#6b7280;padding:10px 12px;font-family:${BRAND_FONT_STACK};">Quantity</th>
+                    <th align="right" style="font-size:12px;color:#6b7280;padding:10px 12px;font-family:${BRAND_FONT_STACK};">Price</th>
                   </tr>
                 </thead>
                 <tbody>${rows}</tbody>
@@ -182,7 +231,7 @@ export function renderReceiptHTML({
 
           <!-- Totals -->
           <tr>
-            <td style="padding:6px 22px 0;">
+            <td style="padding:6px 22px 0;font-family:${BRAND_FONT_STACK};">
               <table role="presentation" width="100%" cellspacing="0" cellpadding="0" style="border:1px solid #e5e7eb;border-radius:8px;">
                 <tr>
                   <td style="padding:10px 12px;font-size:13px;color:#111827;">Subtotal</td>
@@ -202,14 +251,16 @@ export function renderReceiptHTML({
 
           <!-- Delivery meta (Courier • ETA • Weight) -->
           <tr>
-            <td style="padding:10px 22px 0;">
+            <td style="padding:10px 22px 0;font-family:${BRAND_FONT_STACK};">
               <table role="presentation" width="100%" cellspacing="0" cellpadding="0" style="border:1px solid #e5e7eb;border-radius:8px;">
                 <tr style="background:#f9fafb">
                   <td colspan="2" style="padding:10px 12px;font-size:12px;font-weight:700;color:#374151;">DELIVERY</td>
                 </tr>
                 <tr>
                   <td style="padding:10px 12px;font-size:13px;color:#111827;">Courier</td>
-                  <td align="right" style="padding:10px 12px;font-size:13px;color:#111827;">${shipping?.courierName ?? "—"}</td>
+                  <td align="right" style="padding:10px 12px;font-size:13px;color:#111827;">${
+                    shipping?.courierName ?? "—"
+                  }</td>
                 </tr>
                 ${
                   eta
@@ -233,7 +284,7 @@ export function renderReceiptHTML({
 
           <!-- Addresses -->
           <tr>
-            <td style="padding:16px 22px;">
+            <td style="padding:16px 22px;font-family:${BRAND_FONT_STACK};">
               <table role="presentation" width="100%" cellspacing="0" cellpadding="0">
                 <tr>
                   <td valign="top" style="width:50%;padding-right:10px;">
@@ -241,7 +292,11 @@ export function renderReceiptHTML({
                       <div style="font-size:12px;font-weight:700;color:#374151;margin-bottom:6px;">BILLING ADDRESS</div>
                       <div style="font-size:12px;color:#111827;white-space:pre-line;">
                         ${name}
-                        ${recipient.billingAddress ? `\n${recipient.billingAddress}` : ""}
+                        ${
+                          recipient.billingAddress
+                            ? `\n${recipient.billingAddress}`
+                            : ""
+                        }
                         ${recipient.email ? `\n${recipient.email}` : ""}
                       </div>
                     </div>
@@ -251,7 +306,11 @@ export function renderReceiptHTML({
                       <div style="font-size:12px;font-weight:700;color:#374151;margin-bottom:6px;">SHIPPING ADDRESS</div>
                       <div style="font-size:12px;color:#111827;white-space:pre-line;">
                         ${name}
-                        ${recipient.deliveryAddress ? `\n${recipient.deliveryAddress}` : ""}
+                        ${
+                          recipient.deliveryAddress
+                            ? `\n${recipient.deliveryAddress}`
+                            : ""
+                        }
                         ${recipient.email ? `\n${recipient.email}` : ""}
                       </div>
                     </div>
@@ -263,7 +322,7 @@ export function renderReceiptHTML({
 
           <!-- Footer -->
           <tr>
-            <td style="padding:16px 22px;border-top:1px solid #e5e7eb;background:#fafafa;font-size:12px;color:#6b7280;text-align:center;">
+            <td style="padding:16px 22px;border-top:1px solid #e5e7eb;background:#fafafa;font-size:12px;color:#6b7280;text-align:center;font-family:${BRAND_FONT_STACK};">
               Thanks for shopping with Marobi.
             </td>
           </tr>
