@@ -151,10 +151,13 @@ export async function POST(req: NextRequest) {
     // --- Idempotency check by paymentReference
     const existingOrder = await prisma.order.findUnique({
       where: { paymentReference },
-      include: { customer: true },
+      include: {
+        customer: true,
+      },
     });
 
     if (existingOrder) {
+      // bring payment flags up to date
       const updates: Record<string, any> = {};
       if (!existingOrder.paymentVerified) updates.paymentVerified = true;
       if (existingOrder.paymentProviderId !== String(paystackTx.id)) {
@@ -165,6 +168,49 @@ export async function POST(req: NextRequest) {
           where: { id: existingOrder.id },
           data: updates,
         });
+      }
+
+      // 🔔 NEW: best-effort receipt email even for idempotent/duplicate calls
+      try {
+        const fullOrder = await prisma.order.findUnique({
+          where: { id: existingOrder.id },
+          include: {
+            items: true,
+            customer: true,
+          },
+        });
+
+        if (fullOrder) {
+          const recipientForExisting = fullOrder.customer
+            ? {
+                firstName: fullOrder.customer.firstName,
+                lastName: fullOrder.customer.lastName,
+                email: fullOrder.customer.email,
+                phone: customer.phone,
+                deliveryAddress: customer.deliveryAddress,
+                billingAddress: customer.billingAddress,
+              }
+            : {
+                firstName: customer.firstName,
+                lastName: customer.lastName,
+                email: customer.email,
+                phone: customer.phone,
+                deliveryAddress: customer.deliveryAddress,
+                billingAddress: customer.billingAddress,
+              };
+
+          await sendReceiptEmailWithRetry({
+            order: fullOrder,
+            recipient: recipientForExisting,
+            currency: normalizedCurrency,
+            deliveryFee: typeof deliveryFee === "number" ? deliveryFee : 0,
+          });
+        }
+      } catch (err) {
+        console.warn(
+          "[orders/online] Failed to send receipt email for existing order",
+          err
+        );
       }
 
       return NextResponse.json(
@@ -490,7 +536,7 @@ export async function POST(req: NextRequest) {
       return { order: createdOrder };
     });
 
-    // --- Receipt recipient
+    // --- Receipt recipient for freshly created order
     const recipient = existingCustomer
       ? {
           firstName: existingCustomer.firstName,
@@ -517,8 +563,11 @@ export async function POST(req: NextRequest) {
         currency: normalizedCurrency,
         deliveryFee: typeof deliveryFee === "number" ? deliveryFee : 0,
       });
-    } catch {
-      // swallow
+    } catch (err) {
+      console.warn(
+        "[orders/online] Failed to send receipt email for new order",
+        err
+      );
     }
 
     return NextResponse.json(

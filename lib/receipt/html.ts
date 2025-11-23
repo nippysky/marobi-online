@@ -39,38 +39,34 @@ export interface ReceiptShippingMeta {
   summary?: string;
 }
 
-/* --------- Brand tokens / font plumbing --------- */
+/* ---- Brand tokens shared with mail / layout ---- */
 
 const BRAND_NAME = "Marobi";
-const BRAND_PRIMARY = "#043927";
-const BRAND_BG = "#f3f4f6";
-const BRAND_CARD_BG = "#ffffff";
-const BRAND_BORDER = "#e5e7eb";
-const BRAND_TEXT = "#111827";
-const BRAND_MUTED = "#6b7280";
-
-const PUBLIC_BASE_URL =
-  process.env.NEXT_PUBLIC_APP_URL ??
-  process.env.NEXTAUTH_URL ??
-  "https://marobionline.com";
-
+const BRAND_COLOR = "#043927";
 const BRAND_FONT_STACK =
-  "'MarobiMontserrat', 'Montserrat', -apple-system, BlinkMacSystemFont, 'Segoe UI', system-ui, sans-serif";
+  "'Montserrat', -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif";
 
-const FONT_FACE_CSS = `
-@font-face {
-  font-family: 'MarobiMontserrat';
-  src: url('${PUBLIC_BASE_URL}/fonts/Montserrat-Regular.ttf') format('truetype');
-  font-weight: 400;
-  font-style: normal;
+/** For client-side usage we prefer NEXT_PUBLIC_APP_URL or window.location.origin. */
+function resolveAssetBaseUrl(assetBaseUrl?: string): string {
+  if (assetBaseUrl) {
+    return assetBaseUrl.replace(/\/+$/, "");
+  }
+
+  // Browser (admin UI): use current origin
+  if (typeof window !== "undefined" && window.location?.origin) {
+    return window.location.origin.replace(/\/+$/, "");
+  }
+
+  // Server-side fallback for weird cases (e.g. tests)
+  const raw =
+    process.env.NEXT_PUBLIC_APP_URL || "https://marobionline.com";
+  try {
+    const u = new URL(raw);
+    return u.origin;
+  } catch {
+    return raw.replace(/\/+$/, "");
+  }
 }
-@font-face {
-  font-family: 'MarobiMontserrat';
-  src: url('${PUBLIC_BASE_URL}/fonts/Montserrat-Bold.ttf') format('truetype');
-  font-weight: 700;
-  font-style: normal;
-}
-`;
 
 function currencySymbol(c: ReceiptCurrency) {
   const up = String(c).toUpperCase();
@@ -108,13 +104,16 @@ export function renderReceiptHTML({
   recipient,
   currency,
   deliveryFee,
-  shipping, // NEW: includes courierName + humanized summary
+  shipping, // includes courierName + humanized summary
+  assetBaseUrl,
 }: {
   order: ReceiptOrderForRender;
   recipient: ReceiptRecipient;
   currency: ReceiptCurrency;
   deliveryFee: number;
   shipping?: ReceiptShippingMeta;
+  /** Optional base URL for assets (emails should pass an absolute origin). */
+  assetBaseUrl?: string;
 }) {
   const sym = currencySymbol(currency);
   const subtotal = Number(order.totalAmount ?? 0);
@@ -125,31 +124,30 @@ export function renderReceiptHTML({
 
   const { eta, weight } = parseEtaAndWeight(shipping?.summary);
 
+  const base = resolveAssetBaseUrl(assetBaseUrl);
+  // Green logo for light backgrounds (good for white A4 prints)
+  const RECEIPT_LOGO = `${base}/Marobi_Logo.png`;
+
   const rows = order.items
     .map((p, i) => {
       const alt = i % 2 === 0 ? "background:#fafafa;" : "";
       const parts: string[] = [];
       if (p.color) parts.push(`Color: ${p.color}`);
-      parts.push(`Size: ${p.hasSizeMod ? "Custom" : p.size ?? "—"}`);
+      parts.push(`Size: ${p.hasSizeMod ? "Custom" : (p.size ?? "—")}`);
 
       const sizeMod =
         p.hasSizeMod && p.sizeModFee
-          ? `<div style="font-size:12px;color:#92400e">+5% size-mod fee: ${sym}${(
-              p.sizeModFee * p.quantity
-            ).toLocaleString()}</div>`
+          ? `<div style="font-size:12px;color:#92400e;font-family:${BRAND_FONT_STACK};">+5% size-mod fee: ${sym}${(p.sizeModFee * p.quantity).toLocaleString()}</div>`
           : "";
 
       let custom = "";
       if (p.hasSizeMod && p.customSize && Object.keys(p.customSize).length) {
         const readable = Object.entries(p.customSize)
-          .filter(
-            ([_, v]) =>
-              v !== null && v !== undefined && String(v).trim() !== ""
-          )
+          .filter(([_, v]) => v !== null && v !== undefined && String(v).trim() !== "")
           .map(([k, v]) => `${k}: ${v}`)
           .join(" • ");
         if (readable) {
-          custom = `<div style="font-size:12px;color:#374151">Custom measurements: ${readable}</div>`;
+          custom = `<div style="font-size:12px;color:#374151;font-family:${BRAND_FONT_STACK};">Custom measurements: ${readable}</div>`;
         }
       }
 
@@ -159,61 +157,45 @@ export function renderReceiptHTML({
           <div style="display:flex;gap:20px;align-items:flex-start">
             ${
               p.image
-                ? `<img src="${
-                    p.image
-                  }" width="44" height="44" style="object-fit:cover;border-radius:6px;border:1px solid #e5e7eb" />`
+                ? `<img src="${p.image}" width="44" height="44" style="object-fit:cover;border-radius:6px;border:1px solid #e5e7eb" />`
                 : ""
             }
             <div style="margin-left: 30px;">
-              <div style="font-weight:600;color:#111827">${p.name}</div>
-              <div style="font-size:12px;color:#6b7280;">${parts.join(
-                " • "
-              )}</div>
+              <div style="font-weight:600;color:#111827;font-family:${BRAND_FONT_STACK};">${p.name}</div>
+              <div style="font-size:12px;color:#6b7280;font-family:${BRAND_FONT_STACK};">${parts.join(" • ")}</div>
               ${sizeMod}
               ${custom}
             </div>
           </div>
         </td>
-        <td style="padding:10px 12px;white-space:nowrap;text-align:center;color:#111827">${p.quantity}</td>
-        <td style="padding:10px 12px;white-space:nowrap;text-align:right;color:#111827;font-weight:600">${sym}${p.lineTotal.toLocaleString()}</td>
+        <td style="padding:10px 12px;white-space:nowrap;text-align:center;color:#111827;font-family:${BRAND_FONT_STACK};">${p.quantity}</td>
+        <td style="padding:10px 12px;white-space:nowrap;text-align:right;color:#111827;font-weight:600;font-family:${BRAND_FONT_STACK};">${sym}${p.lineTotal.toLocaleString()}</td>
       </tr>`;
     })
     .join("");
 
-  const logoWhiteUrl = `${PUBLIC_BASE_URL}/Marobi_Logo_White.svg`;
-
   return `<!DOCTYPE html>
-<html lang="en">
+<html>
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width,initial-scale=1"/>
   <style type="text/css">
-    ${FONT_FACE_CSS}
-
-    body {
-      margin: 0;
-      background: ${BRAND_BG};
-      font-family: ${BRAND_FONT_STACK};
-    }
-
-    table {
-      border-collapse: collapse;
-    }
+    @import url('https://fonts.googleapis.com/css2?family=Montserrat:wght@400;500;600;700&display=swap');
   </style>
 </head>
-<body>
-  <table role="presentation" width="100%" cellspacing="0" cellpadding="0" style="background:${BRAND_BG};font-family:${BRAND_FONT_STACK};">
+<body style="margin:0;background:#f3f4f6;font-family:${BRAND_FONT_STACK};">
+  <table role="presentation" width="100%" cellspacing="0" cellpadding="0" style="background:#f3f4f6;">
     <tr>
       <td align="center" style="padding:24px 12px;">
-        <table role="presentation" width="640" cellspacing="0" cellpadding="0" style="max-width:640px;background:${BRAND_CARD_BG};border-radius:8px;overflow:hidden;box-shadow:0 2px 8px rgba(0,0,0,.05);">
+        <table role="presentation" width="640" cellspacing="0" cellpadding="0" style="max-width:640px;background:#fff;border-radius:8px;overflow:hidden;box-shadow:0 2px 8px rgba(0,0,0,.05);">
           <!-- Header -->
           <tr>
-            <td style="padding:18px 22px;background:${BRAND_PRIMARY};color:#fff;text-align:left;">
+            <td style="padding:18px 22px;background:#ffffff;border-bottom:1px solid #e5e7eb;">
               <img
-                src="${logoWhiteUrl}"
-                alt="${BRAND_NAME}"
-                height="26"
-                style="display:block;max-width:180px;height:auto;"
+                src="${RECEIPT_LOGO}"
+                alt="${BRAND_NAME} logo"
+                width="150"
+                style="display:inline-block;max-width:180px;height:auto;border:0;line-height:100%;outline:none;text-decoration:none;"
               />
             </td>
           </tr>
@@ -221,13 +203,9 @@ export function renderReceiptHTML({
           <!-- Intro + Order -->
           <tr>
             <td style="padding:16px 22px 0;font-family:${BRAND_FONT_STACK};">
-              <div style="font-size:16px;font-weight:700;color:${BRAND_TEXT};margin-bottom:6px;">
-                Thanks for your order
-              </div>
-              <div style="font-size:13px;color:#374151;line-height:1.6;">
-                Your order has been packed and will be picked up by a courier soon.
-              </div>
-              <div style="margin-top:14px;padding:10px 12px;background:#f9fafb;border:1px solid ${BRAND_BORDER};border-radius:6px;font-size:12px;color:#374151">
+              <div style="font-size:16px;font-weight:700;color:#111827;margin-bottom:6px;font-family:${BRAND_FONT_STACK};">Thanks for your order</div>
+              <div style="font-size:13px;color:#374151;line-height:1.6;font-family:${BRAND_FONT_STACK};">Your order has been packed and would be picked up by a courier soon.</div>
+              <div style="margin-top:14px;padding:10px 12px;background:#f9fafb;border:1px solid #e5e7eb;border-radius:6px;font-size:12px;color:#374151;font-family:${BRAND_FONT_STACK};">
                 <strong>ORDER ${order.id}</strong> (${orderDate})
               </div>
             </td>
@@ -235,13 +213,13 @@ export function renderReceiptHTML({
 
           <!-- Items -->
           <tr>
-            <td style="padding:12px 22px;">
-              <table role="presentation" width="100%" cellspacing="0" cellpadding="0" style="border:1px solid ${BRAND_BORDER};border-radius:8px;overflow:hidden;">
+            <td style="padding:12px 22px;font-family:${BRAND_FONT_STACK};">
+              <table role="presentation" width="100%" cellspacing="0" cellpadding="0" style="border:1px solid #e5e7eb;border-radius:8px;overflow:hidden;">
                 <thead>
-                  <tr style="background:#f9fafb;">
-                    <th align="left"  style="font-size:12px;color:#6b7280;padding:10px 12px;">Product</th>
-                    <th align="center" style="font-size:12px;color:#6b7280;padding:10px 12px;">Quantity</th>
-                    <th align="right" style="font-size:12px;color:#6b7280;padding:10px 12px;">Price</th>
+                  <tr style="background:#f9fafb">
+                    <th align="left"  style="font-size:12px;color:#6b7280;padding:10px 12px;font-family:${BRAND_FONT_STACK};">Product</th>
+                    <th align="center" style="font-size:12px;color:#6b7280;padding:10px 12px;font-family:${BRAND_FONT_STACK};">Quantity</th>
+                    <th align="right" style="font-size:12px;color:#6b7280;padding:10px 12px;font-family:${BRAND_FONT_STACK};">Price</th>
                   </tr>
                 </thead>
                 <tbody>${rows}</tbody>
@@ -251,19 +229,19 @@ export function renderReceiptHTML({
 
           <!-- Totals -->
           <tr>
-            <td style="padding:6px 22px 0;">
-              <table role="presentation" width="100%" cellspacing="0" cellpadding="0" style="border:1px solid ${BRAND_BORDER};border-radius:8px;">
+            <td style="padding:6px 22px 0;font-family:${BRAND_FONT_STACK};">
+              <table role="presentation" width="100%" cellspacing="0" cellpadding="0" style="border:1px solid #e5e7eb;border-radius:8px;">
                 <tr>
-                  <td style="padding:10px 12px;font-size:13px;color:${BRAND_TEXT};">Subtotal</td>
-                  <td align="right" style="padding:10px 12px;font-size:13px;color:${BRAND_TEXT};">${sym}${subtotal.toLocaleString()}</td>
+                  <td style="padding:10px 12px;font-size:13px;color:#111827;font-family:${BRAND_FONT_STACK};">Subtotal</td>
+                  <td align="right" style="padding:10px 12px;font-size:13px;color:#111827;font-family:${BRAND_FONT_STACK};">${sym}${subtotal.toLocaleString()}</td>
                 </tr>
                 <tr style="background:#fafafa">
-                  <td style="padding:10px 12px;font-size:13px;color:${BRAND_TEXT};">Shipping</td>
-                  <td align="right" style="padding:10px 12px;font-size:13px;color:${BRAND_TEXT};">${sym}${shippingFee.toLocaleString()}</td>
+                  <td style="padding:10px 12px;font-size:13px;color:#111827;font-family:${BRAND_FONT_STACK};">Shipping</td>
+                  <td align="right" style="padding:10px 12px;font-size:13px;color:#111827;font-family:${BRAND_FONT_STACK};">${sym}${shippingFee.toLocaleString()}</td>
                 </tr>
                 <tr>
-                  <td style="padding:12px 12px;font-size:14px;font-weight:700;color:${BRAND_TEXT};border-top:1px solid ${BRAND_BORDER};">Total</td>
-                  <td align="right" style="padding:12px 12px;font-size:14px;font-weight:700;color:${BRAND_TEXT};border-top:1px solid ${BRAND_BORDER};">${sym}${total.toLocaleString()}</td>
+                  <td style="padding:12px 12px;font-size:14px;font-weight:700;color:#111827;border-top:1px solid #e5e7eb;font-family:${BRAND_FONT_STACK};">Total</td>
+                  <td align="right" style="padding:12px 12px;font-size:14px;font-weight:700;color:#111827;border-top:1px solid #e5e7eb;font-family:${BRAND_FONT_STACK};">${sym}${total.toLocaleString()}</td>
                 </tr>
               </table>
             </td>
@@ -271,30 +249,28 @@ export function renderReceiptHTML({
 
           <!-- Delivery meta (Courier • ETA • Weight) -->
           <tr>
-            <td style="padding:10px 22px 0;">
-              <table role="presentation" width="100%" cellspacing="0" cellpadding="0" style="border:1px solid ${BRAND_BORDER};border-radius:8px;">
+            <td style="padding:10px 22px 0;font-family:${BRAND_FONT_STACK};">
+              <table role="presentation" width="100%" cellspacing="0" cellpadding="0" style="border:1px solid #e5e7eb;border-radius:8px;">
                 <tr style="background:#f9fafb">
-                  <td colspan="2" style="padding:10px 12px;font-size:12px;font-weight:700;color:#374151;">DELIVERY</td>
+                  <td colspan="2" style="padding:10px 12px;font-size:12px;font-weight:700;color:#374151;font-family:${BRAND_FONT_STACK};">DELIVERY</td>
                 </tr>
                 <tr>
-                  <td style="padding:10px 12px;font-size:13px;color:${BRAND_TEXT};">Courier</td>
-                  <td align="right" style="padding:10px 12px;font-size:13px;color:${BRAND_TEXT};">${
-                    shipping?.courierName ?? "—"
-                  }</td>
+                  <td style="padding:10px 12px;font-size:13px;color:#111827;font-family:${BRAND_FONT_STACK};">Courier</td>
+                  <td align="right" style="padding:10px 12px;font-size:13px;color:#111827;font-family:${BRAND_FONT_STACK};">${shipping?.courierName ?? "—"}</td>
                 </tr>
                 ${
                   eta
                     ? `<tr style="background:#fafafa">
-                         <td style="padding:10px 12px;font-size:13px;color:${BRAND_TEXT};">ETA</td>
-                         <td align="right" style="padding:10px 12px;font-size:13px;color:${BRAND_TEXT};">${eta}</td>
+                         <td style="padding:10px 12px;font-size:13px;color:#111827;font-family:${BRAND_FONT_STACK};">ETA</td>
+                         <td align="right" style="padding:10px 12px;font-size:13px;color:#111827;font-family:${BRAND_FONT_STACK};">${eta}</td>
                        </tr>`
                     : ""
                 }
                 ${
                   weight
                     ? `<tr>
-                         <td style="padding:10px 12px;font-size:13px;color:${BRAND_TEXT};">Weight</td>
-                         <td align="right" style="padding:10px 12px;font-size:13px;color:${BRAND_TEXT};">${weight}</td>
+                         <td style="padding:10px 12px;font-size:13px;color:#111827;font-family:${BRAND_FONT_STACK};">Weight</td>
+                         <td align="right" style="padding:10px 12px;font-size:13px;color:#111827;font-family:${BRAND_FONT_STACK};">${weight}</td>
                        </tr>`
                     : ""
                 }
@@ -304,33 +280,25 @@ export function renderReceiptHTML({
 
           <!-- Addresses -->
           <tr>
-            <td style="padding:16px 22px;">
+            <td style="padding:16px 22px;font-family:${BRAND_FONT_STACK};">
               <table role="presentation" width="100%" cellspacing="0" cellpadding="0">
                 <tr>
                   <td valign="top" style="width:50%;padding-right:10px;">
-                    <div style="background:#f9fafb;border:1px solid ${BRAND_BORDER};border-radius:8px;padding:12px;">
-                      <div style="font-size:12px;font-weight:700;color:#374151;margin-bottom:6px;">BILLING ADDRESS</div>
-                      <div style="font-size:12px;color:${BRAND_TEXT};white-space:pre-line;">
+                    <div style="background:#f9fafb;border:1px solid #e5e7eb;border-radius:8px;padding:12px;">
+                      <div style="font-size:12px;font-weight:700;color:#374151;margin-bottom:6px;font-family:${BRAND_FONT_STACK};">BILLING ADDRESS</div>
+                      <div style="font-size:12px;color:#111827;white-space:pre-line;font-family:${BRAND_FONT_STACK};">
                         ${name}
-                        ${
-                          recipient.billingAddress
-                            ? `\n${recipient.billingAddress}`
-                            : ""
-                        }
+                        ${recipient.billingAddress ? `\n${recipient.billingAddress}` : ""}
                         ${recipient.email ? `\n${recipient.email}` : ""}
                       </div>
                     </div>
                   </td>
                   <td valign="top" style="width:50%;padding-left:10px;">
-                    <div style="background:#f9fafb;border:1px solid ${BRAND_BORDER};border-radius:8px;padding:12px;">
-                      <div style="font-size:12px;font-weight:700;color:#374151;margin-bottom:6px;">SHIPPING ADDRESS</div>
-                      <div style="font-size:12px;color:${BRAND_TEXT};white-space:pre-line;">
+                    <div style="background:#f9fafb;border:1px solid #e5e7eb;border-radius:8px;padding:12px;">
+                      <div style="font-size:12px;font-weight:700;color:#374151;margin-bottom:6px;font-family:${BRAND_FONT_STACK};">SHIPPING ADDRESS</div>
+                      <div style="font-size:12px;color:#111827;white-space:pre-line;font-family:${BRAND_FONT_STACK};">
                         ${name}
-                        ${
-                          recipient.deliveryAddress
-                            ? `\n${recipient.deliveryAddress}`
-                            : ""
-                        }
+                        ${recipient.deliveryAddress ? `\n${recipient.deliveryAddress}` : ""}
                         ${recipient.email ? `\n${recipient.email}` : ""}
                       </div>
                     </div>
@@ -342,7 +310,7 @@ export function renderReceiptHTML({
 
           <!-- Footer -->
           <tr>
-            <td style="padding:16px 22px;border-top:1px solid ${BRAND_BORDER};background:#fafafa;font-size:12px;color:${BRAND_MUTED};text-align:center;">
+            <td style="padding:16px 22px;border-top:1px solid #e5e7eb;background:#fafafa;font-size:12px;color:#6b7280;text-align:center;font-family:${BRAND_FONT_STACK};">
               Thanks for shopping with ${BRAND_NAME}.
             </td>
           </tr>
