@@ -86,11 +86,21 @@ export async function generateInvoicePDF({
 
   const margin = doc.page.margins.left;
 
-  // --- Header: logo + invoice meta ---
+  // --- Header: logo (as Buffer) + invoice meta ---
   const logoPathPng = path.join(process.cwd(), "public", "Marobi_Logo.png");
+  let logoBytes: Buffer | null = null;
 
-  if (fs.existsSync(logoPathPng)) {
-    doc.image(logoPathPng, margin, margin - 4, { height: 26 });
+  try {
+    if (fs.existsSync(logoPathPng)) {
+      logoBytes = fs.readFileSync(logoPathPng);
+    }
+  } catch {
+    logoBytes = null;
+  }
+
+  if (logoBytes) {
+    // IMPORTANT: pass Buffer, not a path, to avoid pdfkit's internal stub fs
+    doc.image(logoBytes, margin, margin - 4, { height: 26 });
   } else {
     doc
       .font(boldFont)
