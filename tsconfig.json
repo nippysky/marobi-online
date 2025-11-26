@@ -29,7 +29,7 @@
     ".next/types/**/*.ts",
     "next-auth.d.ts",
     "types/**/*.d.ts",
-    "scripts/seed.cjs"
+    "scripts/seed.mjs"
   ],
   "exclude": ["node_modules"]
 }

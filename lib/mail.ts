@@ -125,8 +125,7 @@ const FROM_NO_REPLY =
   process.env.EMAIL_FROM_NO_REPLY || `Marobi <${EMAIL_NO_REPLY}>`;
 const FROM_SHIPPING =
   process.env.EMAIL_FROM_SHIPPING || `Marobi Shipping <${EMAIL_SHIPPING}>`;
-const FROM_INFO =
-  process.env.EMAIL_FROM_INFO || `Marobi <${EMAIL_INFO}>`;
+const FROM_INFO = process.env.EMAIL_FROM_INFO || `Marobi <${EMAIL_INFO}>`;
 
 const ENVELOPE_FROM = (
   process.env.EMAIL_ENVELOPE_FROM?.trim() || EMAIL_INFO
@@ -302,8 +301,8 @@ export function renderEmail(opts: RenderEmailOptions): string {
               <img
                 src="${BRAND_LOGO_DARK_BG}"
                 alt="${BRAND_NAME} logo"
-                width="140"
-                style="display:inline-block;max-width:180px;height:auto;border:0;line-height:100%;outline:none;text-decoration:none;"
+                width="120"
+                style="display:inline-block;max-width:160px;height:auto;border:0;line-height:100%;outline:none;text-decoration:none;"
               />
             </td>
           </tr>

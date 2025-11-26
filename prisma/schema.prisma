@@ -1,11 +1,11 @@
 generator client {
-  provider   = "prisma-client"                  // <- new client generator
-  output     = "../lib/generated/prisma-client" // <- keep output under lib
-  engineType = "client"                         // <- Rust-free architecture
+  provider   = "prisma-client"
+  output     = "../lib/generated/prisma-client"
+  engineType = "client"
 }
 
 datasource db {
-  provider  = "postgresql"
+  provider = "postgresql"
 }
 
 model Customer {
@@ -130,10 +130,6 @@ model Review {
   @@index([rating])
 }
 
-/// *
-///  * Only courier options exist (no pickup).
-///  * - FIXED: charge baseFee (optionally in baseCurrency).
-///  * - EXTERNAL: fetch from provider (DHL/FedEx/etc) at checkout.
 model DeliveryOption {
   id           String              @id @default(cuid())
   name         String
@@ -180,8 +176,12 @@ model Order {
   items               OrderItem[]
   receiptEmailStatus  ReceiptEmailStatus?
 
+  shipment            Shipment?
+
   @@index([createdAt])
   @@index([status, createdAt])
+  @@index([customerId, createdAt])
+  @@index([channel, createdAt])
 }
 
 model OrderItem {
@@ -201,6 +201,8 @@ model OrderItem {
   customSize Json?
   order      Order    @relation(fields: [orderId], references: [id], onDelete: Cascade)
   variant    Variant  @relation(fields: [variantId], references: [id])
+
+  @@index([orderId])
 }
 
 model OfflineSale {
@@ -240,6 +242,8 @@ model WebhookEvent {
   eventId   String   @unique
   payload   Json
   createdAt DateTime @default(now())
+
+  @@index([provider, createdAt])
 }
 
 model OrphanPayment {
@@ -254,7 +258,6 @@ model OrphanPayment {
   resolutionNote String?
 }
 
-/// * Homepage hero
 model HeroSlide {
   id          String  @id @default(cuid())
   imageUrl    String
@@ -266,10 +269,10 @@ model HeroSlide {
 }
 
 model SizeChart {
-  id        String         @id @default(cuid())
+  id        String        @id @default(cuid())
   name      String
-  updatedAt DateTime       @updatedAt
-  rows      SizeChartRow[]  // <— clean relation name
+  updatedAt DateTime      @updatedAt
+  rows      SizeChartRow[]
 }
 
 model SizeChartRow {
@@ -278,14 +281,78 @@ model SizeChartRow {
   bodySize    String
   productSize String
   code        String
-
-  chart    SizeChart @relation(fields: [chartId], references: [id], onDelete: Cascade)
-  chartId  String
+  chart       SizeChart @relation(fields: [chartId], references: [id], onDelete: Cascade)
+  chartId     String
 
   @@index([chartId, order])
 }
 
-/// ─────────────────────────── Enums ───────────────────────────
+enum ShipmentProvider {
+  SHIPBUBBLE
+}
+
+enum ShipmentStatus {
+  REQUESTED
+  LABEL_CREATED
+  IN_TRANSIT
+  DELIVERED
+  CANCELLED
+  FAILED
+}
+
+model Shipment {
+  id                  String           @id @default(cuid())
+  orderId             String           @unique
+  provider            ShipmentProvider
+  status              ShipmentStatus   @default(REQUESTED)
+
+  externalOrderId     String?
+  requestToken        String?
+  serviceCode         String?
+  courierName         String?
+  courierId           String?
+  currency            Currency?
+  amount              Float?
+
+  labelUrl            String?
+  airwayBill          String?
+  trackingUrl         String?
+  trackingNumber      String?
+
+  deliveryEtaText     String?
+  pickupEtaText       String?
+
+  weightKg            Float?
+  pieces              Int?             @default(1)
+  lengthCm            Float?
+  widthCm             Float?
+  heightCm            Float?
+  boxSizeId           Int?
+  insuranceCode       String?
+  isCodLabel          Boolean?         @default(false)
+
+  senderAddressCode   Int?
+  receiverAddressCode Int?
+  senderAddressJson   Json?
+  receiverAddressJson Json?
+
+  rawRequest          Json?
+  rawResponse         Json?
+  rawCancel           Json?
+
+  cancelledAt         DateTime?
+  cancelReason        String?
+
+  createdAt           DateTime         @default(now())
+  updatedAt           DateTime         @updatedAt
+
+  order               Order            @relation(fields: [orderId], references: [id], onDelete: Cascade)
+
+  @@index([status, createdAt])
+  @@index([provider, trackingNumber])
+  @@unique([provider, externalOrderId])
+}
+
 enum ProductStatus {
   Draft
   Published
@@ -333,7 +400,6 @@ enum RefundStatus {
   Failed
 }
 
-/// * How delivery is priced
 enum DeliveryPricingMode {
   FIXED
   EXTERNAL
@@ -344,5 +410,5 @@ model ProductSerial {
 }
 
 model OrderSerial {
-  id        BigInt   @id @default(autoincrement())
+  id BigInt @id @default(autoincrement())
 }

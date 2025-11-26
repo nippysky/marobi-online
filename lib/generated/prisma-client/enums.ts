@@ -9,6 +9,25 @@
 * 🟢 You can import this file directly.
 */
 
+export const ShipmentProvider = {
+  SHIPBUBBLE: 'SHIPBUBBLE'
+} as const
+
+export type ShipmentProvider = (typeof ShipmentProvider)[keyof typeof ShipmentProvider]
+
+
+export const ShipmentStatus = {
+  REQUESTED: 'REQUESTED',
+  LABEL_CREATED: 'LABEL_CREATED',
+  IN_TRANSIT: 'IN_TRANSIT',
+  DELIVERED: 'DELIVERED',
+  CANCELLED: 'CANCELLED',
+  FAILED: 'FAILED'
+} as const
+
+export type ShipmentStatus = (typeof ShipmentStatus)[keyof typeof ShipmentStatus]
+
+
 export const ProductStatus = {
   Draft: 'Draft',
   Published: 'Published',

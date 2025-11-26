@@ -49,10 +49,7 @@ export type Variant = Prisma.VariantModel
 export type Review = Prisma.ReviewModel
 /**
  * Model DeliveryOption
- * *
- * * Only courier options exist (no pickup).
- * * - FIXED: charge baseFee (optionally in baseCurrency).
- * * - EXTERNAL: fetch from provider (DHL/FedEx/etc) at checkout.
+ * 
  */
 export type DeliveryOption = Prisma.DeliveryOptionModel
 /**
@@ -92,7 +89,7 @@ export type WebhookEvent = Prisma.WebhookEventModel
 export type OrphanPayment = Prisma.OrphanPaymentModel
 /**
  * Model HeroSlide
- * * Homepage hero
+ * 
  */
 export type HeroSlide = Prisma.HeroSlideModel
 /**
@@ -105,6 +102,11 @@ export type SizeChart = Prisma.SizeChartModel
  * 
  */
 export type SizeChartRow = Prisma.SizeChartRowModel
+/**
+ * Model Shipment
+ * 
+ */
+export type Shipment = Prisma.ShipmentModel
 /**
  * Model ProductSerial
  * 

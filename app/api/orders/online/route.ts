@@ -25,11 +25,10 @@ function toLowest(amount: number): number {
   return Math.round(amount * 100);
 }
 
-// Shape of shipping.shipbubble that the frontend sends
 type ShipbubbleShippingPayload = {
   requestToken: string;
   serviceCode: string;
-  courierId?: string; // comes from selected rate
+  courierId?: string;
   fee?: number;
   currency?: "NGN" | "USD" | "EUR" | "GBP";
   courierName?: string;
@@ -45,24 +44,20 @@ interface OnlineOrderPayload {
   deliveryFee?: number;
   deliveryOptionId?: string | null;
   paymentReference: string;
-  // optional shipping block (backward-compatible)
   shipping?: {
     source?: "shipbubble" | string;
     shipbubble?: ShipbubbleShippingPayload;
   };
 }
 
-/** Format sequential numeric serial into your desired order ID: M-ORD-001, 002, ... */
 function formatOrderIdFromSerial(serial: bigint | number): string {
   const n = typeof serial === "bigint" ? Number(serial) : serial;
-  // pad to at least 3 digits; grows naturally (001 .. 099 .. 100 .. 1000)
   return `M-ORD-${String(n).padStart(3, "0")}`;
 }
 
 export async function POST(req: NextRequest) {
   await prismaReady;
 
-  // hoisted so it's available in the catch block
   let requestPaymentReference: string | undefined;
 
   try {
@@ -81,19 +76,21 @@ export async function POST(req: NextRequest) {
 
     requestPaymentReference = paymentReference;
 
-    // --- Validations
-    if (!Array.isArray(items) || items.length === 0)
+    if (!Array.isArray(items) || items.length === 0) {
       return NextResponse.json({ error: "No items provided" }, { status: 400 });
-    if (!customer || !customer.email)
+    }
+    if (!customer || !customer.email) {
       return NextResponse.json(
         { error: "Customer email is required" },
         { status: 400 }
       );
-    if (!paymentReference || typeof paymentReference !== "string")
+    }
+    if (!paymentReference || typeof paymentReference !== "string") {
       return NextResponse.json(
         { error: "Missing or invalid paymentReference" },
         { status: 400 }
       );
+    }
 
     const normalizedCurrency = (currency || "").toString().toUpperCase();
     if (!ALLOWED_CURRENCIES.includes(normalizedCurrency as AllowedCurrency)) {
@@ -103,7 +100,6 @@ export async function POST(req: NextRequest) {
       );
     }
 
-    // --- Verify Paystack
     let paystackTx: any;
     try {
       paystackTx = await verifyTransaction(paymentReference);
@@ -124,11 +120,9 @@ export async function POST(req: NextRequest) {
       );
     }
 
-    // --- Is this a Shipbubble shipping flow?
     const isShipbubbleFlow =
       shipping?.source === "shipbubble" && !!shipping?.shipbubble;
 
-    // --- Validate delivery option (courier-only system) when provided.
     if (deliveryOptionId && !isShipbubbleFlow) {
       const deliveryOpt = await prisma.deliveryOption.findUnique({
         where: { id: deliveryOptionId },
@@ -147,7 +141,6 @@ export async function POST(req: NextRequest) {
       }
     }
 
-    // --- Idempotency check by paymentReference
     const existingOrder = await prisma.order.findUnique({
       where: { paymentReference },
       include: {
@@ -156,7 +149,6 @@ export async function POST(req: NextRequest) {
     });
 
     if (existingOrder) {
-      // bring payment flags up to date
       const updates: Record<string, any> = {};
       if (!existingOrder.paymentVerified) updates.paymentVerified = true;
       if (existingOrder.paymentProviderId !== String(paystackTx.id)) {
@@ -169,7 +161,6 @@ export async function POST(req: NextRequest) {
         });
       }
 
-      // best-effort receipt email even for idempotent/duplicate calls
       try {
         const fullOrder = await prisma.order.findUnique({
           where: { id: existingOrder.id },
@@ -224,7 +215,6 @@ export async function POST(req: NextRequest) {
       );
     }
 
-    // --- Precompute items
     let itemsSubtotal = 0;
     let totalNGN = 0;
     let aggregatedWeight = 0;
@@ -254,7 +244,6 @@ export async function POST(req: NextRequest) {
         );
       }
 
-      // unit price in selected currency
       let unitPrice = 0;
       switch (normalizedCurrency) {
         case "USD":
@@ -272,7 +261,6 @@ export async function POST(req: NextRequest) {
           break;
       }
 
-      // line total
       let lineTotal = unitPrice * i.quantity;
       if (i.hasSizeMod && i.sizeModFee) {
         lineTotal += i.sizeModFee * i.quantity;
@@ -316,7 +304,6 @@ export async function POST(req: NextRequest) {
     const orderTotal =
       itemsSubtotal + (typeof deliveryFee === "number" ? deliveryFee : 0);
 
-    // Verify captured amount === expected
     const expectedLowest = toLowest(orderTotal);
     if (paystackTx.amount !== expectedLowest) {
       try {
@@ -351,7 +338,6 @@ export async function POST(req: NextRequest) {
       );
     }
 
-    // --- Identify customer vs guest
     const session = await getServerSession(authOptions);
     let customerId: string | null = null;
     let existingCustomer:
@@ -429,13 +415,11 @@ export async function POST(req: NextRequest) {
       };
     }
 
-    // --- Build initial deliveryDetails object
     const deliveryDetailsData: any = {
       aggregatedWeight: parseFloat(aggregatedWeight.toFixed(3)),
       deliveryOptionId: deliveryOptionId ?? null,
     };
 
-    // If the caller sent Shipbubble shipping info, save a snapshot now
     if (isShipbubbleFlow) {
       deliveryDetailsData.shipbubble = {
         requestToken: shipping!.shipbubble!.requestToken,
@@ -451,10 +435,8 @@ export async function POST(req: NextRequest) {
       };
     }
 
-    // --- Create order & decrement stock atomically
     const { order } = await prisma.$transaction(
       async (tx) => {
-        // Revalidate & decrement stock
         for (const i of items) {
           const where: Record<string, any> = { productId: i.productId };
           if (i.color && i.color !== "N/A") where.color = i.color;
@@ -481,15 +463,14 @@ export async function POST(req: NextRequest) {
           });
         }
 
-        // Reserve the next serial atomically and format the ID
-        const serial = await tx.orderSerial.create({ data: {} }); // requires migrate+generate
+        const serial = await tx.orderSerial.create({ data: {} });
         const newOrderId = formatOrderIdFromSerial(serial.id);
 
         const orderData: any = {
           id: newOrderId,
           status: OrderStatus.Processing,
           currency: normalizedCurrency as CurrencyEnum,
-          totalAmount: itemsSubtotal, // items only
+          totalAmount: itemsSubtotal,
           totalNGN: Math.round(totalNGN),
           paymentMethod,
           paymentReference,
@@ -522,13 +503,9 @@ export async function POST(req: NextRequest) {
 
         return { order: createdOrder };
       },
-      {
-        // give Prisma more breathing room for the interactive transaction
-        timeout: 15_000,
-      }
+      { timeout: 15_000 }
     );
 
-    // 🔄 Sync saved addresses for logged-in customers AFTER the transaction
     if (customerId && !guestInfo) {
       try {
         await prisma.customer.update({
@@ -548,7 +525,6 @@ export async function POST(req: NextRequest) {
       }
     }
 
-    // --- Receipt recipient for freshly created order
     const recipient = existingCustomer
       ? {
           firstName: existingCustomer.firstName,
@@ -567,7 +543,6 @@ export async function POST(req: NextRequest) {
           billingAddress: customer.billingAddress,
         };
 
-    // Best-effort email
     try {
       await sendReceiptEmailWithRetry({
         order,
@@ -591,7 +566,6 @@ export async function POST(req: NextRequest) {
       { status: 201 }
     );
   } catch (err: any) {
-    // Unique constraint on paymentReference — return the found order if possible
     if (err?.code === "P2002" && Array.isArray(err?.meta?.target)) {
       if ((err.meta.target as string[]).includes("paymentReference")) {
         try {
@@ -600,7 +574,7 @@ export async function POST(req: NextRequest) {
             (err as any)?.params?.paymentReference ??
             requestPaymentReference;
 
-          if (refFromError) {
+        if (refFromError) {
             const fallbackOrder = await prisma.order.findUnique({
               where: { paymentReference: refFromError as string },
               include: { customer: true },

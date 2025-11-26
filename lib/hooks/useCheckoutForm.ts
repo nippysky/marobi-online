@@ -40,7 +40,8 @@ function safeFirst<T>(arr?: T[]): T | undefined {
 /**
  * Manages country/state/phone code selection.
  * - Fetches countries from /api/utils/countries (aliased to /api/countries)
- * - Ensures phone code is normalized (single leading '+')
+ * - Fetches states from /api/utils/states (CSC-backed, no external HTTP)
+ * - Exposes loading flags and keeps phone code in sync with country
  */
 export function useCountryState(
   initialCountryName?: string,
@@ -52,12 +53,17 @@ export function useCountryState(
   const [state, setState] = useState(initialState ?? "");
   const [phoneCode, setPhoneCode] = useState("+234");
 
+  const [countriesLoading, setCountriesLoading] = useState(false);
+  const [statesLoading, setStatesLoading] = useState(false);
+
   // Load countries
   useEffect(() => {
     let cancelled = false;
 
     async function loadCountries() {
       try {
+        setCountriesLoading(true);
+
         const res = await fetch("/api/utils/countries");
         if (!res.ok) throw new Error("Failed to fetch countries");
         const data: CountryData[] = await res.json();
@@ -80,6 +86,8 @@ export function useCountryState(
           setCountryList([]);
           toast.error("Could not load country list.");
         }
+      } finally {
+        if (!cancelled) setCountriesLoading(false);
       }
     }
 
@@ -96,9 +104,12 @@ export function useCountryState(
     async function loadStates() {
       if (!country) {
         setStateList([]);
+        setState("");
+        setStatesLoading(false);
         return;
       }
 
+      setStatesLoading(true);
       setStateList([]);
       setState("");
 
@@ -106,7 +117,10 @@ export function useCountryState(
         const res = await fetch("/api/utils/states", {
           method: "POST",
           headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ country: country.name }),
+          body: JSON.stringify({
+            countryIso2: country.iso2,
+            country: country.name,
+          }),
         });
         if (!res.ok) throw new Error("Failed to fetch states");
         const json = await res.json();
@@ -119,6 +133,8 @@ export function useCountryState(
           setStateList([]);
           toast.error("Could not load states.");
         }
+      } finally {
+        if (!cancelled) setStatesLoading(false);
       }
 
       // Keep phone code in sync with selected country
@@ -163,17 +179,13 @@ export function useCountryState(
     phoneCode,
     setPhoneCode,
     phoneOptions,
+    countriesLoading,
+    statesLoading,
   };
 }
 
 /* --------------------- Delivery options (schema-aligned) --------------------- */
 
-/**
- * Loads delivery options for a country.
- * - Uses your API `/api/delivery-options?country=...`
- * - Filters to `active` options
- * - Handles `pricingMode = EXTERNAL` where baseFee may be null (returns 0)
- */
 export function useDeliveryOptions(countryName: string | undefined | null) {
   const [deliveryOptions, setDeliveryOptions] = useState<DeliveryOption[]>([]);
   const [selectedDeliveryOption, setSelectedDeliveryOption] =
@@ -194,12 +206,10 @@ export function useDeliveryOptions(countryName: string | undefined | null) {
         const data: DeliveryOption[] = await res.json();
         if (cancelled) return;
 
-        // stick to active ones only
         const active = (data || []).filter((o) => o.active);
 
         setDeliveryOptions(active);
 
-        // keep selection if still present; otherwise pick first
         setSelectedDeliveryOption((prev) => {
           if (prev) {
             const match = active.find((o) => o.id === prev.id);
@@ -219,7 +229,6 @@ export function useDeliveryOptions(countryName: string | undefined | null) {
     };
   }, [countryName]);
 
-  // If EXTERNAL or null baseFee, default to 0 here (UI can show “Calculated at checkout”)
   const deliveryFee =
     selectedDeliveryOption?.baseFee != null
       ? selectedDeliveryOption.baseFee
@@ -236,7 +245,12 @@ export function useDeliveryOptions(countryName: string | undefined | null) {
 /* --------------------------- Cart totals helpers --------------------------- */
 
 export function useCartTotals(
-  items: { price: number; sizeModFee: number; quantity: number; unitWeight?: number }[]
+  items: {
+    price: number;
+    sizeModFee: number;
+    quantity: number;
+    unitWeight?: number;
+  }[]
 ) {
   const itemsSubtotal = useMemo(
     () =>
@@ -255,13 +269,12 @@ export function useCartTotals(
   const totalWeight = useMemo(
     () =>
       items.reduce(
-        (sum, item) => sum + ((item.unitWeight ?? 0) * item.quantity),
+        (sum, item) => sum + (item.unitWeight ?? 0) * item.quantity,
         0
       ),
     [items]
   );
 
-  // Total without delivery
   const total = itemsSubtotal + sizeModTotal;
 
   return { itemsSubtotal, sizeModTotal, totalWeight, total };

@@ -68,6 +68,7 @@ export const ModelName = {
   HeroSlide: 'HeroSlide',
   SizeChart: 'SizeChart',
   SizeChartRow: 'SizeChartRow',
+  Shipment: 'Shipment',
   ProductSerial: 'ProductSerial',
   OrderSerial: 'OrderSerial'
 } as const
@@ -354,6 +355,48 @@ export const SizeChartRowScalarFieldEnum = {
 } as const
 
 export type SizeChartRowScalarFieldEnum = (typeof SizeChartRowScalarFieldEnum)[keyof typeof SizeChartRowScalarFieldEnum]
+
+
+export const ShipmentScalarFieldEnum = {
+  id: 'id',
+  orderId: 'orderId',
+  provider: 'provider',
+  status: 'status',
+  externalOrderId: 'externalOrderId',
+  requestToken: 'requestToken',
+  serviceCode: 'serviceCode',
+  courierName: 'courierName',
+  courierId: 'courierId',
+  currency: 'currency',
+  amount: 'amount',
+  labelUrl: 'labelUrl',
+  airwayBill: 'airwayBill',
+  trackingUrl: 'trackingUrl',
+  trackingNumber: 'trackingNumber',
+  deliveryEtaText: 'deliveryEtaText',
+  pickupEtaText: 'pickupEtaText',
+  weightKg: 'weightKg',
+  pieces: 'pieces',
+  lengthCm: 'lengthCm',
+  widthCm: 'widthCm',
+  heightCm: 'heightCm',
+  boxSizeId: 'boxSizeId',
+  insuranceCode: 'insuranceCode',
+  isCodLabel: 'isCodLabel',
+  senderAddressCode: 'senderAddressCode',
+  receiverAddressCode: 'receiverAddressCode',
+  senderAddressJson: 'senderAddressJson',
+  receiverAddressJson: 'receiverAddressJson',
+  rawRequest: 'rawRequest',
+  rawResponse: 'rawResponse',
+  rawCancel: 'rawCancel',
+  cancelledAt: 'cancelledAt',
+  cancelReason: 'cancelReason',
+  createdAt: 'createdAt',
+  updatedAt: 'updatedAt'
+} as const
+
+export type ShipmentScalarFieldEnum = (typeof ShipmentScalarFieldEnum)[keyof typeof ShipmentScalarFieldEnum]
 
 
 export const ProductSerialScalarFieldEnum = {

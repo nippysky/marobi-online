@@ -1,13 +1,58 @@
 // lib/pdf/invoice.ts
+//
+// Marobi invoice PDF as Buffer.
+// Mirrors the email-style layout and includes:
+//  - Size-mod fee
+//  - Custom measurements
+//  - Courier name (Shipbubble or legacy delivery options)
+// Uses Montserrat from /public/fonts if available, with sensible fallbacks.
+
 import PDFDocument from "pdfkit/js/pdfkit.standalone.js";
 import QRCode from "qrcode";
 import fs from "fs";
 import path from "path";
 
+/** Ensure deliveryDetails is always an object (handle JSON string). */
+function parseDeliveryDetails(raw: any): any {
+  if (!raw) return {};
+  if (typeof raw === "string") {
+    try {
+      return JSON.parse(raw);
+    } catch {
+      return {};
+    }
+  }
+  return raw;
+}
+
+/** Extract courier name in the same way as the HTML receipt. */
+function getCourierNameFromOrder(order: any): string | null {
+  const details = parseDeliveryDetails(order?.deliveryDetails);
+
+  const shipbubble =
+    details?.shipbubble ||
+    details?.shipping?.shipbubble ||
+    {};
+
+  const candidates: any[] = [
+    shipbubble.courierName,
+    shipbubble.courier_name,
+    shipbubble.courier,
+    order?.deliveryOption?.name,
+    details.courierName,
+    details.courier_name,
+  ];
+
+  for (const c of candidates) {
+    if (typeof c === "string" && c.trim()) {
+      return c.trim();
+    }
+  }
+  return null;
+}
+
 /**
- * Marobi invoice PDF as Buffer.
- * Mirrors the email-style layout and includes size-mod fee + custom measurements.
- * Uses Montserrat from /public/fonts if available, with sensible fallbacks.
+ * Generate the invoice PDF.
  */
 export async function generateInvoicePDF({
   order,
@@ -31,6 +76,8 @@ export async function generateInvoicePDF({
     }>;
     paymentMethod: string;
     totalAmount?: number; // items subtotal
+    deliveryDetails?: any;
+    deliveryOption?: { name?: string | null } | null;
   };
   recipient: {
     firstName: string;
@@ -42,6 +89,9 @@ export async function generateInvoicePDF({
   currency: "NGN" | "USD" | "EUR" | "GBP" | string;
   deliveryFee: number;
 }): Promise<Buffer> {
+  // Courier name (for header).
+  const courierName = getCourierNameFromOrder(order) || "—";
+
   // 1) Choose fonts (prefer Montserrat, then Noto/Inter/Roboto, else Helvetica)
   const fontPairs: [string, string][] = [
     ["Montserrat-Regular.ttf", "Montserrat-Bold.ttf"],
@@ -55,7 +105,6 @@ export async function generateInvoicePDF({
     path.join(process.cwd(), "lib", "pdf", "fonts"),
   ];
 
-  // Create the document first
   const doc = new PDFDocument({ size: "A4", margin: 36, bufferPages: true });
 
   let bodyFont = "Helvetica";
@@ -98,7 +147,7 @@ export async function generateInvoicePDF({
       ? "€"
       : "£";
 
-  // If we're stuck on Helvetica, show "NGN 12,000" instead of "₦" which some fonts can't render.
+  // If we're stuck on Helvetica, show "NGN 12,000" instead of "₦"
   const currencyLabel =
     bodyFont === "Helvetica" && symbol === "₦" ? "NGN " : symbol;
   const money = (n: number) =>
@@ -117,7 +166,7 @@ export async function generateInvoicePDF({
 
   const margin = doc.page.margins.left;
 
-  /* ---------- Header (text logo, no PNG) ---------- */
+  /* ---------- Header (text logo + meta) ---------- */
 
   doc
     .font(boldFont)
@@ -125,7 +174,7 @@ export async function generateInvoicePDF({
     .fillColor("#043927")
     .text("Marobi", margin, margin);
 
-  const rightBoxWidth = 200;
+  const rightBoxWidth = 220;
   const rightX = doc.page.width - margin - rightBoxWidth;
 
   doc
@@ -147,15 +196,21 @@ export async function generateInvoicePDF({
       rightX,
       margin + 28,
       { width: rightBoxWidth, align: "right" }
+    )
+    .text(
+      `Courier:        ${courierName}`,
+      rightX,
+      margin + 42,
+      { width: rightBoxWidth, align: "right" }
     );
 
-  // QR code for the order id
+  // QR code for the order id (nice-to-have)
   try {
     const qrDataURL = await QRCode.toDataURL(order.id, { margin: 0, width: 72 });
     const buf = Buffer.from(qrDataURL.split(",")[1], "base64");
     doc.image(buf, rightX + rightBoxWidth - 72, margin - 6, { width: 72 });
   } catch {
-    // QR is nice-to-have; ignore if it fails
+    // ignore QR failures
   }
 
   doc

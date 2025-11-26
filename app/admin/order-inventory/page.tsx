@@ -1,4 +1,3 @@
-// app/admin/order-inventory/page.ts
 export const dynamic = "force-dynamic";
 
 import { prisma } from "@/lib/db";
@@ -62,7 +61,6 @@ function extractCourierName(raw: unknown): string | null {
     try {
       obj = JSON.parse(raw);
     } catch {
-      // if it’s already a short string like "GIG Logistics", accept it
       const s = raw.trim();
       if (s && s.length <= 64 && !s.includes("{") && !s.includes("}")) {
         return s;
@@ -72,10 +70,6 @@ function extractCourierName(raw: unknown): string | null {
   }
   if (!obj || typeof obj !== "object" || Array.isArray(obj)) return null;
 
-  // Common places we saved it:
-  //   deliveryDetails.shipbubble.courierName
-  //   deliveryDetails.courierName
-  //   deliveryDetails.shipbubble.meta?.courierName (just in case)
   const fromShipbubble = obj.shipbubble?.courierName;
   const direct = obj.courierName;
   const fromMeta = obj.shipbubble?.meta?.courierName;
@@ -89,7 +83,6 @@ function extractCourierName(raw: unknown): string | null {
   return c || null;
 }
 
-/** Extract a numeric kg weight from common fields in provider payloads. */
 function extractWeightKg(obj: Record<string, any>): string | null {
   const cand =
     obj.aggregatedWeight ??
@@ -107,11 +100,6 @@ function extractWeightKg(obj: Record<string, any>): string | null {
   return hasKg ? asStr : `${n}kg`;
 }
 
-/**
- * Summarize delivery details for the table/CSV.
- * - Prefer the chosen courier name (from deliveryDetails) over provider labels.
- * - Example: "GIG Logistics • Weight: 2kg • ETA: Within 32 hrs".
- */
 function humanizeDeliveryDetails(
   raw: unknown,
   deliveryOption?: { name?: string | null }
@@ -138,18 +126,14 @@ function humanizeDeliveryDetails(
 
   const obj = raw as Record<string, any>;
   const pieces: string[] = [];
-
-  // Always start with the courier’s display name
   pieces.push(baseLabel);
 
-  // Weight
   const weight =
     extractWeightKg(obj) ??
     (obj.meta && extractWeightKg(obj.meta)) ??
     (obj.raw && extractWeightKg(obj.raw));
   if (weight) pieces.push(`Weight: ${weight}`);
 
-  // ETA, if available (Shipbubble often has meta/raw.eta)
   const eta =
     (obj.meta && (obj.meta.eta || obj.meta.ETA)) ||
     (obj.raw && (obj.raw.eta || obj.raw.ETA));
@@ -212,7 +196,6 @@ async function fetchOrders(): Promise<OrderRow[]> {
   });
 
   return orders.map((o): OrderRow => {
-    // customer/guest
     let customerObj: OrderRow["customer"];
     if (o.customer) {
       customerObj = {
@@ -235,7 +218,6 @@ async function fetchOrders(): Promise<OrderRow[]> {
       customerObj = { id: null, name: "Guest", email: "", phone: "", address: "—" };
     }
 
-    // NGN ledger subtotal (includes size-mod fee when order currency is NGN).
     const totalNGN: number = o.items.reduce((sum, it) => {
       const base = (it.variant?.product.priceNGN ?? 0) * it.quantity;
       const sizeFeeNGN = o.currency === "NGN" ? (it.sizeModFee ?? 0) * it.quantity : 0;
@@ -257,7 +239,6 @@ async function fetchOrders(): Promise<OrderRow[]> {
       customSize: normalizeCustomSize(it.customSize),
     }));
 
-    // Prefer the chosen courier name even if there is no DB deliveryOption
     const derivedCourier = extractCourierName(o.deliveryDetails as any);
     const deliveryOption: OrderRow["deliveryOption"] =
       o.deliveryOption
@@ -269,7 +250,7 @@ async function fetchOrders(): Promise<OrderRow[]> {
           }
         : derivedCourier
         ? {
-            id: "shipbubble", // synthetic
+            id: "shipbubble",
             name: derivedCourier,
             provider: "Shipbubble",
             type: "COURIER",
@@ -278,21 +259,23 @@ async function fetchOrders(): Promise<OrderRow[]> {
 
     return {
       id: o.id,
-      status: o.status,
-      currency: o.currency,
+      status: o.status as OrderRow["status"],
+      currency: o.currency as OrderRow["currency"],
       totalAmount: o.totalAmount,
       totalNGN,
       paymentMethod: o.paymentMethod,
       createdAt: o.createdAt.toISOString(),
       products,
       customer: customerObj,
-      channel: o.channel,
+      channel: o.channel as any,
       deliveryOption,
       deliveryFee: o.deliveryFee ?? 0,
-      deliveryDetails: humanizeDeliveryDetails(
-        o.deliveryDetails,
-        deliveryOption ?? undefined
-      ),
+      deliveryDetails: humanizeDeliveryDetails(o.deliveryDetails, deliveryOption ?? undefined),
+
+      // 🔽 Populate UI helpers from DB
+      hasShipbubbleLabel: !!o.shipbubbleOrderId,
+      shipbubbleOrderId: o.shipbubbleOrderId,
+      shipbubbleTrackingUrl: o.shipbubbleTrackingUrl,
     };
   });
 }

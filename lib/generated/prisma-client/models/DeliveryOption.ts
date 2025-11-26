@@ -14,10 +14,7 @@ import type * as Prisma from "../internal/prismaNamespace"
 
 /**
  * Model DeliveryOption
- * *
- * * Only courier options exist (no pickup).
- * * - FIXED: charge baseFee (optionally in baseCurrency).
- * * - EXTERNAL: fetch from provider (DHL/FedEx/etc) at checkout.
+ * 
  */
 export type DeliveryOptionModel = runtime.Types.Result.DefaultSelection<Prisma.$DeliveryOptionPayload>
 

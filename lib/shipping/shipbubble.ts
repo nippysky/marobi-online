@@ -1,14 +1,24 @@
 /**
  * Shipbubble client (production-hardened)
  *
- * … existing header comment left as-is …
+ * Centralized wrapper around the Shipbubble HTTP API.
+ * - Retries on transient/network errors
+ * - Attaches raw Shipbubble payload to thrown Errors
+ * - Can be debugged with SHIPBUBBLE_DEBUG=1
  */
 
+import { ShipmentStatus } from "@/lib/generated/prisma-client/client";
+
 type ShipbubbleOk<T> = { status: "success"; message?: string; data: T };
-type ShipbubbleErr = { status: "failed" | "error"; message?: string; errors?: any };
+type ShipbubbleErr = {
+  status: "failed" | "error";
+  message?: string;
+  errors?: any;
+};
 type ShipbubbleResp<T> = ShipbubbleOk<T> | ShipbubbleErr;
 
-const API_BASE = process.env.SHIPBUBBLE_API_BASE || "https://api.shipbubble.com/v1";
+const API_BASE =
+  process.env.SHIPBUBBLE_API_BASE || "https://api.shipbubble.com/v1";
 const API_KEY = process.env.SHIPBUBBLE_API_KEY || "";
 const DEBUG = process.env.SHIPBUBBLE_DEBUG === "1";
 
@@ -25,10 +35,10 @@ function redact(v: unknown, left = 8, right = 4) {
 
 const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms));
 
-async function sbFetch<T>(
+async function sbFetch<TData>(
   path: string,
   init: RequestInit & { timeoutMs?: number; retry?: number } = {}
-): Promise<ShipbubbleOk<T>> {
+): Promise<ShipbubbleOk<TData>> {
   assertApiKey();
 
   const { timeoutMs = 15000, retry = 3, headers, ...rest } = init;
@@ -42,7 +52,26 @@ async function sbFetch<T>(
     const timer = setTimeout(() => controller.abort(), timeoutMs);
 
     try {
-      const res = await fetch(`${API_BASE}${path}`, {
+      const url = `${API_BASE}${path}`;
+
+      if (DEBUG && attempt === 1) {
+        let bodyPreview: unknown = undefined;
+        try {
+          if (typeof rest.body === "string") {
+            bodyPreview = JSON.parse(rest.body);
+          }
+        } catch {
+          bodyPreview = String(rest.body || "").slice(0, 300);
+        }
+        console.log("[Shipbubble][HTTP] request", {
+          url,
+          method: rest.method || "GET",
+          attempt,
+          body: bodyPreview,
+        });
+      }
+
+      const res = await fetch(url, {
         ...rest,
         headers: {
           "Content-Type": "application/json",
@@ -61,9 +90,16 @@ async function sbFetch<T>(
         const text = await res.text().catch(() => "");
         if (!res.ok) {
           if (DEBUG) {
-            console.error("[Shipbubble] Non-JSON error", { path, status: res.status, body: text.slice(0, 500) });
+            console.error("[Shipbubble] Non-JSON error", {
+              path,
+              status: res.status,
+              body: text.slice(0, 500),
+            });
           }
-          throw new Error(`Shipbubble HTTP ${res.status}`);
+          const error = new Error(`Shipbubble HTTP ${res.status}`);
+          (error as any).httpStatus = res.status;
+          (error as any).path = path;
+          throw error;
         }
         json = {};
       }
@@ -90,25 +126,40 @@ async function sbFetch<T>(
         }
 
         if (retriable && attempt < retry) {
-          const delay = Math.round(base * Math.pow(2, attempt - 1) * (1 + Math.random()));
+          const delay = Math.round(
+            base * Math.pow(2, attempt - 1) * (1 + Math.random())
+          );
           await sleep(delay);
           continue;
         }
 
-        throw new Error(message);
+        const error = new Error(message);
+        (error as any).httpStatus = res.status;
+        (error as any).path = path;
+        (error as any).shipbubble = errPayload;
+        throw error;
       }
 
-      return json as ShipbubbleOk<T>;
+      return json as ShipbubbleOk<TData>;
     } catch (err: any) {
       const isAbort = err?.name === "AbortError";
-      const retriable = isAbort || /network|fetch/i.test(String(err?.message || err));
+      const retriable =
+        isAbort || /network|fetch/i.test(String(err?.message || err));
 
       if (DEBUG) {
-        console.warn("[Shipbubble] fetch error", { path, attempt, isAbort, message: String(err?.message || err) });
+        console.warn("[Shipbubble] fetch error", {
+          path,
+          attempt,
+          isAbort,
+          message: String(err?.message || err),
+          shipbubble: err?.shipbubble,
+        });
       }
 
       if (retriable && attempt < retry) {
-        const delay = Math.round(base * Math.pow(2, attempt - 1) * (1 + Math.random()));
+        const delay = Math.round(
+          base * Math.pow(2, attempt - 1) * (1 + Math.random())
+        );
         await sleep(delay);
         continue;
       }
@@ -126,6 +177,8 @@ export interface AddressValidateBody {
   email: string;
   name: string;
   address: string;
+  latitude?: number;
+  longitude?: number;
 }
 
 export interface ValidatedAddressData {
@@ -145,35 +198,74 @@ export interface ValidatedAddressData {
 
 type ValidateResp = ValidatedAddressData;
 
-export async function validateAddressExact(input: AddressValidateBody): Promise<ValidatedAddressData> {
+/**
+ * EXACT mirror of the Postman call:
+ *
+ * POST /shipping/address/validate
+ * {
+ *   "phone": "+234...",
+ *   "email": "someone@example.com",
+ *   "name": "Firstname Lastname",
+ *   "address": "63 Birnin Kebbi Crescent, Garki 2, Abuja..."
+ * }
+ */
+export async function validateAddressExact(
+  input: AddressValidateBody
+): Promise<ValidatedAddressData> {
+  const body = {
+    phone: String(input.phone || "").trim(),
+    email: String(input.email || "").trim(),
+    name: String(input.name || "").trim(),
+    address: String(input.address || "").trim(),
+    ...(typeof input.latitude === "number" ? { latitude: input.latitude } : {}),
+    ...(typeof input.longitude === "number" ? { longitude: input.longitude } : {}),
+  };
+
   if (DEBUG) {
-    console.log("[Shipbubble][Address][validate] input:", {
-      name: input.name,
-      email: input.email,
-      phone: input.phone,
-      addressSample: input.address?.slice(0, 48),
+    console.log("[Shipbubble][Address][validate] outgoing body:", {
+      ...body,
+      addressSample: body.address.slice(0, 160),
     });
   }
 
-  const resp = await sbFetch<ValidateResp>("/shipping/address/validate", {
-    method: "POST",
-    body: JSON.stringify(input),
-  });
-
-  const data = (resp as any).data ?? {};
-  if (!data?.address_code) {
-    if (DEBUG) console.error("[Shipbubble][Address][validate] missing address_code", data);
-    throw new Error("Shipbubble could not validate this address.");
-  }
-
-  if (DEBUG) {
-    console.log("[Shipbubble][Address][validate] success:", {
-      address_code: data.address_code,
-      formatted_address: data.formatted_address,
+  try {
+    const resp = await sbFetch<ValidateResp>("/shipping/address/validate", {
+      method: "POST",
+      body: JSON.stringify(body),
     });
-  }
 
-  return data as ValidatedAddressData;
+    const data = (resp as any).data ?? {};
+    if (!data?.address_code) {
+      if (DEBUG) {
+        console.error("[Shipbubble][Address][validate] missing address_code in response", data);
+      }
+      throw new Error(
+        "Shipbubble could not validate this address. Please check the address string."
+      );
+    }
+
+    if (DEBUG) {
+      console.log("[Shipbubble][Address][validate] success:", {
+        address_code: data.address_code,
+        formatted_address: data.formatted_address,
+        country: data.country,
+        state: data.state,
+        city: data.city,
+      });
+    }
+
+    return data as ValidatedAddressData;
+  } catch (err: any) {
+    if (DEBUG) {
+      console.error("[Shipbubble][Address][validate] error:", {
+        message: err?.message,
+        httpStatus: err?.httpStatus,
+        path: err?.path,
+        shipbubble: err?.shipbubble,
+      });
+    }
+    throw err;
+  }
 }
 
 /* ─────────────────────────────── Boxes (GET) ─────────────────────────────── */
@@ -189,21 +281,33 @@ export type BoxSize = {
 };
 
 export async function fetchBoxes(): Promise<BoxSize[]> {
-  const resp = await sbFetch<BoxSize[]>("/shipping/labels/boxes", { method: "GET" });
-  const arr = Array.isArray((resp as any).data) ? ((resp as any).data as BoxSize[]) : [];
+  const resp = await sbFetch<BoxSize[]>("/shipping/labels/boxes", {
+    method: "GET",
+  });
+  const arr = Array.isArray((resp as any).data)
+    ? ((resp as any).data as BoxSize[])
+    : [];
   if (DEBUG) console.log("[Shipbubble][Boxes] fetched:", arr.length);
   return arr;
 }
 
-export function pickBoxForWeight(totalWeightKg: number, boxes: BoxSize[]): BoxSize | null {
-  const sorted = [...boxes].sort((a, b) => Number(a.max_weight) - Number(b.max_weight));
-  const chosen = sorted.find((b) => Number(b.max_weight) >= Number(totalWeightKg)) || null;
+export function pickBoxForWeight(
+  totalWeightKg: number,
+  boxes: BoxSize[]
+): BoxSize | null {
+  const sorted = [...boxes].sort(
+    (a, b) => Number(a.max_weight) - Number(b.max_weight)
+  );
+  const chosen =
+    sorted.find((b) => Number(b.max_weight) >= Number(totalWeightKg)) || null;
 
   if (DEBUG) {
     console.log("[Shipbubble][Boxes] pickBoxForWeight:", {
       totalWeightKg,
       available: boxes.length,
-      chosen: chosen ? { name: chosen.name, max_weight: chosen.max_weight } : null,
+      chosen: chosen
+        ? { name: chosen.name, max_weight: chosen.max_weight }
+        : null,
     });
   }
 
@@ -213,8 +317,8 @@ export function pickBoxForWeight(totalWeightKg: number, boxes: BoxSize[]): BoxSi
 /* ─────────────────────── Courier Integrations (NEW) ─────────────────────── */
 
 export type CourierIntegration = {
-  name: string;          // e.g., "Redstar", "GIG logistics", "Dellyman"
-  service_code: string;  // e.g., "red_star_courier", "gigl", "dellyman"
+  name: string; // e.g., "Redstar", "GIG logistics", "Dellyman"
+  service_code: string; // e.g., "red_star_courier", "gigl", "dellyman"
   origin_country?: string;
   international?: boolean;
   domestic?: boolean;
@@ -223,8 +327,12 @@ export type CourierIntegration = {
 };
 
 export async function fetchCourierIntegrations(): Promise<CourierIntegration[]> {
-  const resp = await sbFetch<CourierIntegration[]>("/shipping/couriers", { method: "GET" });
-  const list = Array.isArray((resp as any)?.data) ? ((resp as any).data as CourierIntegration[]) : [];
+  const resp = await sbFetch<CourierIntegration[]>("/shipping/couriers", {
+    method: "GET",
+  });
+  const list = Array.isArray((resp as any)?.data)
+    ? ((resp as any).data as CourierIntegration[])
+    : [];
   if (DEBUG) console.log("[Shipbubble][Couriers] fetched:", list.length);
   return list;
 }
@@ -271,7 +379,9 @@ export type RatesRespRaw = {
   [k: string]: any;
 };
 
-export async function fetchRatesExact(body: FetchRatesBody): Promise<RatesRespRaw> {
+export async function fetchRatesExact(
+  body: FetchRatesBody
+): Promise<RatesRespRaw> {
   if (DEBUG) {
     console.log("[Shipbubble][Rates][fetch] body:", {
       sender_address_code: body.sender_address_code,
@@ -297,15 +407,21 @@ export async function fetchRatesExact(body: FetchRatesBody): Promise<RatesRespRa
   return data;
 }
 
-/** NEW: selected-couriers endpoint */
-export async function fetchRatesForSelected(serviceCodesCsv: string, body: FetchRatesBody): Promise<RatesRespRaw> {
+/** Selected-couriers endpoint */
+export async function fetchRatesForSelected(
+  serviceCodesCsv: string,
+  body: FetchRatesBody
+): Promise<RatesRespRaw> {
   if (DEBUG) {
     console.log("[Shipbubble][Rates][selected] codes:", serviceCodesCsv);
   }
-  const resp = await sbFetch<RatesRespRaw>(`/shipping/fetch_rates/${encodeURIComponent(serviceCodesCsv)}`, {
-    method: "POST",
-    body: JSON.stringify(body),
-  });
+  const resp = await sbFetch<RatesRespRaw>(
+    `/shipping/fetch_rates/${encodeURIComponent(serviceCodesCsv)}`,
+    {
+      method: "POST",
+      body: JSON.stringify(body),
+    }
+  );
   const data = (resp as any).data as RatesRespRaw;
   if (DEBUG) {
     console.log("[Shipbubble][Rates][selected] success:", {
@@ -358,7 +474,7 @@ export function chooseBestRate(
   return withParsed.sort((a, b) => a.days - b.days)[0]?.r ?? rates[0];
 }
 
-/* ───────────────────────── Label creation (unchanged) ────────────────────── */
+/* ───────────────────────── Label creation ────────────────────── */
 
 export type ShipbubbleShipmentData = {
   order_id?: string;
@@ -373,7 +489,8 @@ export type ShipbubbleShipmentData = {
   [k: string]: any;
 };
 
-export type ShipbubbleCreateShipmentResponse = ShipbubbleOk<ShipbubbleShipmentData>;
+export type ShipbubbleCreateShipmentResponse =
+  ShipbubbleOk<ShipbubbleShipmentData>;
 
 export async function createShipmentLabelExact({
   requestToken,
@@ -429,6 +546,74 @@ export async function createShipmentLabelExact({
   return resp as ShipbubbleCreateShipmentResponse;
 }
 
+/* ───────────────────────── Label cancel ────────────────────── */
+
+export async function cancelShipmentLabel(orderId: string): Promise<void> {
+  if (!orderId) throw new Error("Shipbubble order_id required to cancel");
+
+  const path = `/shipping/labels/cancel/${encodeURIComponent(orderId)}`;
+  const resp = await sbFetch<{ status?: string; message?: string }>(path, {
+    method: "POST",
+    timeoutMs: 20000,
+  });
+
+  if (DEBUG) {
+    console.log("[Shipbubble][Label][cancel] response:", {
+      status: (resp as any)?.status,
+      message: (resp as any)?.message,
+    });
+  }
+}
+
+/* ───────────────────────── List multiple by IDs ────────────────────── */
+
+export type ShipbubbleListItem = {
+  order_id: string;
+  status?: string; // pending | confirmed | picked_up | in_transit | completed | cancelled
+  tracking_url?: string;
+  courier?: { name?: string; tracking_code?: string; [k: string]: any };
+  [k: string]: any;
+};
+
+export type ShipbubbleListByIdsResp = {
+  results: ShipbubbleListItem[];
+};
+
+/** Fetch up to 50 shipments per call by their Shipbubble order_ids */
+export async function listShipmentsByIds(
+  externalOrderIds: string[]
+): Promise<ShipbubbleListItem[]> {
+  if (!externalOrderIds?.length) return [];
+  const chunks: string[][] = [];
+  for (let i = 0; i < externalOrderIds.length; i += 50) {
+    chunks.push(externalOrderIds.slice(i, i + 50));
+  }
+  const out: ShipbubbleListItem[] = [];
+  for (const chunk of chunks) {
+    const csv = chunk.map((s) => encodeURIComponent(String(s))).join(",");
+    const resp = await sbFetch<any>(`/shipping/labels/list/${csv}`, {
+      method: "GET",
+    });
+    const data = (resp as any)?.data ?? {};
+    const list: ShipbubbleListItem[] = Array.isArray(data.results)
+      ? data.results
+      : [];
+    out.push(...list);
+  }
+  return out;
+}
+
+/* ───────────────────────── Status mapper ────────────────────── */
+/** Map Shipbubble status to your internal ShipmentStatus */
+export function mapShipbubbleStatus(s?: string): ShipmentStatus {
+  const v = (s || "").toLowerCase();
+  if (v === "cancelled") return ShipmentStatus.CANCELLED;
+  if (v === "completed") return ShipmentStatus.DELIVERED;
+  if (v === "picked_up" || v === "in_transit") return ShipmentStatus.IN_TRANSIT;
+  // “pending” / “confirmed” (and unknowns) mean label exists but is not moving yet
+  return ShipmentStatus.LABEL_CREATED;
+}
+
 /* Optional convenience type kept, unchanged */
 export type DeliveryDetailsV1 = {
   version: 1;
@@ -448,10 +633,24 @@ export type DeliveryDetailsV1 = {
   };
   addresses: {
     from: { country: string; city: string; line1: string };
-    to: { country: string; city: string; line1: string; phone?: string; email?: string };
+    to: {
+      country: string;
+      city: string;
+      line1: string;
+      phone?: string;
+      email?: string;
+    };
   };
-  label?: { labelUrl?: string; airwayBill?: string; requestTokenPreview?: string };
-  tracking?: { trackingNumber?: string; status?: string; lastUpdateAt?: string };
+  label?: {
+    labelUrl?: string;
+    airwayBill?: string;
+    requestTokenPreview?: string;
+  };
+  tracking?: {
+    trackingNumber?: string;
+    status?: string;
+    lastUpdateAt?: string;
+  };
   raw?: unknown;
 };
 
@@ -461,7 +660,13 @@ export function buildDeliveryDetailsV1(args: {
   totalWeightKg: number;
   dims?: { l: number; w: number; h: number };
   from: { country: string; city: string; line1: string };
-  to: { country: string; city: string; line1: string; phone?: string; email?: string };
+  to: {
+    country: string;
+    city: string;
+    line1: string;
+    phone?: string;
+    email?: string;
+  };
   raw?: unknown;
 }): DeliveryDetailsV1 {
   return {
@@ -473,7 +678,9 @@ export function buildDeliveryDetailsV1(args: {
       courier: args.rate.courierName,
       currency: args.rate.currency as DeliveryDetailsV1["quote"]["currency"],
       amount: args.rate.total,
-      deliveryEtaDays: Number(args.rate.deliveryEtaText?.match(/\d+/)?.[0] || ""),
+      deliveryEtaDays: Number(
+        args.rate.deliveryEtaText?.match(/\d+/)?.[0] || ""
+      ),
     },
     parcel: { weightKg: args.totalWeightKg, dimensionsCm: args.dims },
     addresses: { from: args.from, to: args.to },

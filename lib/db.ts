@@ -1,6 +1,7 @@
 // lib/db.ts
 import "server-only";
 import { Pool } from "pg";
+import type { PoolConfig } from "pg";
 import { PrismaClient } from "@/lib/generated/prisma-client/client";
 import { PrismaPg } from "@prisma/adapter-pg";
 
@@ -41,7 +42,6 @@ function getDoCaFromEnv(): string | undefined {
   }
 
   if (pemRaw) {
-    // handle "\n" escaped style
     const pem = pemRaw.includes("\\n") ? pemRaw.replace(/\\n/g, "\n") : pemRaw;
     if (pem.includes("BEGIN CERTIFICATE")) {
       console.log("[db] Loaded DO CA from DO_DB_CA_CERT");
@@ -55,6 +55,54 @@ function getDoCaFromEnv(): string | undefined {
   return undefined;
 }
 
+/**
+ * Decide SSL config:
+ * - In **production-like** envs (NODE_ENV=production or VERCEL set) AND a CA is present
+ *   → use strict TLS with that CA.
+ * - In **local dev** (default) or if CA looks sketchy
+ *   → fall back to `rejectUnauthorized:false` to avoid TLS “self-signed” hell.
+ */
+function buildSslConfig(): PoolConfig["ssl"] {
+  const ca = getDoCaFromEnv();
+  const nodeEnv = process.env.NODE_ENV ?? "development";
+  const isProdLike =
+    nodeEnv === "production" || process.env.VERCEL === "1";
+
+  if (isProdLike && ca) {
+    console.log(
+      "[db] Using strict TLS with DigitalOcean CA (production-like environment)."
+    );
+    return {
+      ca,
+      rejectUnauthorized: true,
+    };
+  }
+
+  console.warn(
+    "[db] Using RELAXED TLS for Postgres (rejectUnauthorized=false). " +
+      "This is expected in local dev, and avoids 'self-signed certificate in certificate chain' errors."
+  );
+
+  return {
+    rejectUnauthorized: false,
+  };
+}
+
+/**
+ * Some connection strings have `?sslmode=require` etc.
+ * That’s fine, but we don’t want it fighting with our `ssl` config,
+ * so we strip only the `sslmode` query param and keep the rest.
+ */
+function sanitizeConnectionString(raw: string): string {
+  try {
+    const u = new URL(raw);
+    u.searchParams.delete("sslmode");
+    return u.toString();
+  } catch {
+    return raw;
+  }
+}
+
 function createClient(): PrismaClient {
   const connectionString = process.env.DATABASE_URL;
   if (!connectionString) {
@@ -64,39 +112,20 @@ function createClient(): PrismaClient {
     );
   }
 
-  const ca = getDoCaFromEnv();
-
-  // If CA present → strict TLS. Otherwise fallback to relaxed TLS
-  // (same effect as your previous rejectUnauthorized:false in prod).
-  const sslConfig =
-    ca != null
-      ? {
-          rejectUnauthorized: true,
-          ca,
-        }
-      : {
-          rejectUnauthorized: false,
-        };
-
-  if (ca) {
-    console.log(
-      "[db] Using custom CA for TLS (rejectUnauthorized=true, DigitalOcean managed DB)."
-    );
-  } else {
-    console.warn(
-      "[db] DO_DB_CA_CERT[_BASE64] not set. Falling back to rejectUnauthorized=false. " +
-        "This is fine for now but less secure; consider wiring the CA env."
-    );
-  }
+  const sanitized = sanitizeConnectionString(connectionString);
+  const ssl = buildSslConfig();
 
   const pool = new Pool({
-    connectionString,
-    ssl: sslConfig,
+    connectionString: sanitized,
+    ssl,
   });
 
   const client = new PrismaClient({
     adapter: new PrismaPg(pool),
-    log: process.env.NODE_ENV === "development" ? ["warn", "error"] : ["error"],
+    log:
+      process.env.NODE_ENV === "development"
+        ? ["warn", "error"]
+        : ["error"],
   });
 
   // Graceful shutdown when Node process ends (where applicable)

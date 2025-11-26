@@ -14,7 +14,7 @@ import type * as Prisma from "../internal/prismaNamespace"
 
 /**
  * Model HeroSlide
- * * Homepage hero
+ * 
  */
 export type HeroSlideModel = runtime.Types.Result.DefaultSelection<Prisma.$HeroSlidePayload>
 

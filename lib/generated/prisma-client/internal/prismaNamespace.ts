@@ -401,6 +401,7 @@ export const ModelName = {
   HeroSlide: 'HeroSlide',
   SizeChart: 'SizeChart',
   SizeChartRow: 'SizeChartRow',
+  Shipment: 'Shipment',
   ProductSerial: 'ProductSerial',
   OrderSerial: 'OrderSerial'
 } as const
@@ -418,7 +419,7 @@ export type TypeMap<ExtArgs extends runtime.Types.Extensions.InternalArgs = runt
     omit: GlobalOmitOptions
   }
   meta: {
-    modelProps: "customer" | "staff" | "category" | "product" | "variant" | "review" | "deliveryOption" | "order" | "orderItem" | "offlineSale" | "wishlistItem" | "receiptEmailStatus" | "webhookEvent" | "orphanPayment" | "heroSlide" | "sizeChart" | "sizeChartRow" | "productSerial" | "orderSerial"
+    modelProps: "customer" | "staff" | "category" | "product" | "variant" | "review" | "deliveryOption" | "order" | "orderItem" | "offlineSale" | "wishlistItem" | "receiptEmailStatus" | "webhookEvent" | "orphanPayment" | "heroSlide" | "sizeChart" | "sizeChartRow" | "shipment" | "productSerial" | "orderSerial"
     txIsolationLevel: TransactionIsolationLevel
   }
   model: {
@@ -1680,6 +1681,80 @@ export type TypeMap<ExtArgs extends runtime.Types.Extensions.InternalArgs = runt
         }
       }
     }
+    Shipment: {
+      payload: Prisma.$ShipmentPayload<ExtArgs>
+      fields: Prisma.ShipmentFieldRefs
+      operations: {
+        findUnique: {
+          args: Prisma.ShipmentFindUniqueArgs<ExtArgs>
+          result: runtime.Types.Utils.PayloadToResult<Prisma.$ShipmentPayload> | null
+        }
+        findUniqueOrThrow: {
+          args: Prisma.ShipmentFindUniqueOrThrowArgs<ExtArgs>
+          result: runtime.Types.Utils.PayloadToResult<Prisma.$ShipmentPayload>
+        }
+        findFirst: {
+          args: Prisma.ShipmentFindFirstArgs<ExtArgs>
+          result: runtime.Types.Utils.PayloadToResult<Prisma.$ShipmentPayload> | null
+        }
+        findFirstOrThrow: {
+          args: Prisma.ShipmentFindFirstOrThrowArgs<ExtArgs>
+          result: runtime.Types.Utils.PayloadToResult<Prisma.$ShipmentPayload>
+        }
+        findMany: {
+          args: Prisma.ShipmentFindManyArgs<ExtArgs>
+          result: runtime.Types.Utils.PayloadToResult<Prisma.$ShipmentPayload>[]
+        }
+        create: {
+          args: Prisma.ShipmentCreateArgs<ExtArgs>
+          result: runtime.Types.Utils.PayloadToResult<Prisma.$ShipmentPayload>
+        }
+        createMany: {
+          args: Prisma.ShipmentCreateManyArgs<ExtArgs>
+          result: BatchPayload
+        }
+        createManyAndReturn: {
+          args: Prisma.ShipmentCreateManyAndReturnArgs<ExtArgs>
+          result: runtime.Types.Utils.PayloadToResult<Prisma.$ShipmentPayload>[]
+        }
+        delete: {
+          args: Prisma.ShipmentDeleteArgs<ExtArgs>
+          result: runtime.Types.Utils.PayloadToResult<Prisma.$ShipmentPayload>
+        }
+        update: {
+          args: Prisma.ShipmentUpdateArgs<ExtArgs>
+          result: runtime.Types.Utils.PayloadToResult<Prisma.$ShipmentPayload>
+        }
+        deleteMany: {
+          args: Prisma.ShipmentDeleteManyArgs<ExtArgs>
+          result: BatchPayload
+        }
+        updateMany: {
+          args: Prisma.ShipmentUpdateManyArgs<ExtArgs>
+          result: BatchPayload
+        }
+        updateManyAndReturn: {
+          args: Prisma.ShipmentUpdateManyAndReturnArgs<ExtArgs>
+          result: runtime.Types.Utils.PayloadToResult<Prisma.$ShipmentPayload>[]
+        }
+        upsert: {
+          args: Prisma.ShipmentUpsertArgs<ExtArgs>
+          result: runtime.Types.Utils.PayloadToResult<Prisma.$ShipmentPayload>
+        }
+        aggregate: {
+          args: Prisma.ShipmentAggregateArgs<ExtArgs>
+          result: runtime.Types.Utils.Optional<Prisma.AggregateShipment>
+        }
+        groupBy: {
+          args: Prisma.ShipmentGroupByArgs<ExtArgs>
+          result: runtime.Types.Utils.Optional<Prisma.ShipmentGroupByOutputType>[]
+        }
+        count: {
+          args: Prisma.ShipmentCountArgs<ExtArgs>
+          result: runtime.Types.Utils.Optional<Prisma.ShipmentCountAggregateOutputType> | number
+        }
+      }
+    }
     ProductSerial: {
       payload: Prisma.$ProductSerialPayload<ExtArgs>
       fields: Prisma.ProductSerialFieldRefs
@@ -2135,6 +2210,48 @@ export const SizeChartRowScalarFieldEnum = {
 export type SizeChartRowScalarFieldEnum = (typeof SizeChartRowScalarFieldEnum)[keyof typeof SizeChartRowScalarFieldEnum]
 
 
+export const ShipmentScalarFieldEnum = {
+  id: 'id',
+  orderId: 'orderId',
+  provider: 'provider',
+  status: 'status',
+  externalOrderId: 'externalOrderId',
+  requestToken: 'requestToken',
+  serviceCode: 'serviceCode',
+  courierName: 'courierName',
+  courierId: 'courierId',
+  currency: 'currency',
+  amount: 'amount',
+  labelUrl: 'labelUrl',
+  airwayBill: 'airwayBill',
+  trackingUrl: 'trackingUrl',
+  trackingNumber: 'trackingNumber',
+  deliveryEtaText: 'deliveryEtaText',
+  pickupEtaText: 'pickupEtaText',
+  weightKg: 'weightKg',
+  pieces: 'pieces',
+  lengthCm: 'lengthCm',
+  widthCm: 'widthCm',
+  heightCm: 'heightCm',
+  boxSizeId: 'boxSizeId',
+  insuranceCode: 'insuranceCode',
+  isCodLabel: 'isCodLabel',
+  senderAddressCode: 'senderAddressCode',
+  receiverAddressCode: 'receiverAddressCode',
+  senderAddressJson: 'senderAddressJson',
+  receiverAddressJson: 'receiverAddressJson',
+  rawRequest: 'rawRequest',
+  rawResponse: 'rawResponse',
+  rawCancel: 'rawCancel',
+  cancelledAt: 'cancelledAt',
+  cancelReason: 'cancelReason',
+  createdAt: 'createdAt',
+  updatedAt: 'updatedAt'
+} as const
+
+export type ShipmentScalarFieldEnum = (typeof ShipmentScalarFieldEnum)[keyof typeof ShipmentScalarFieldEnum]
+
+
 export const ProductSerialScalarFieldEnum = {
   id: 'id'
 } as const
@@ -2393,6 +2510,34 @@ export type ListEnumRefundStatusFieldRefInput<$PrismaModel> = FieldRefInputType<
 
 
 /**
+ * Reference to a field of type 'ShipmentProvider'
+ */
+export type EnumShipmentProviderFieldRefInput<$PrismaModel> = FieldRefInputType<$PrismaModel, 'ShipmentProvider'>
+    
+
+
+/**
+ * Reference to a field of type 'ShipmentProvider[]'
+ */
+export type ListEnumShipmentProviderFieldRefInput<$PrismaModel> = FieldRefInputType<$PrismaModel, 'ShipmentProvider[]'>
+    
+
+
+/**
+ * Reference to a field of type 'ShipmentStatus'
+ */
+export type EnumShipmentStatusFieldRefInput<$PrismaModel> = FieldRefInputType<$PrismaModel, 'ShipmentStatus'>
+    
+
+
+/**
+ * Reference to a field of type 'ShipmentStatus[]'
+ */
+export type ListEnumShipmentStatusFieldRefInput<$PrismaModel> = FieldRefInputType<$PrismaModel, 'ShipmentStatus[]'>
+    
+
+
+/**
  * Reference to a field of type 'BigInt'
  */
 export type BigIntFieldRefInput<$PrismaModel> = FieldRefInputType<$PrismaModel, 'BigInt'>
@@ -2501,6 +2646,7 @@ export type GlobalOmitConfig = {
   heroSlide?: Prisma.HeroSlideOmit
   sizeChart?: Prisma.SizeChartOmit
   sizeChartRow?: Prisma.SizeChartRowOmit
+  shipment?: Prisma.ShipmentOmit
   productSerial?: Prisma.ProductSerialOmit
   orderSerial?: Prisma.OrderSerialOmit
 }

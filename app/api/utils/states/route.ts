@@ -1,61 +1,96 @@
-// app/api/countries/states/route.ts
+// app/api/utils/states/route.ts
 export const dynamic = "force-dynamic";
 
 import { NextResponse } from "next/server";
+import { Country, State as CscState } from "country-state-city";
 
-type CountriesNowStatesResp = {
-  data?: { name?: string; states?: Array<{ name?: string }> };
-  error?: boolean;
-  msg?: string;
-};
+interface StatesRequestBody {
+  countryIso2?: string;
+  iso2?: string;
+  countryCode?: string;
+  cca2?: string;
+  country?: string; // human name, e.g. "Nigeria"
+}
 
-export async function POST(request: Request) {
+/**
+ * POST /api/utils/states
+ * Body can be:
+ *   { countryIso2: "NG" }   // preferred
+ *   { country: "Nigeria" }  // fallback
+ *
+ * Response:
+ *   { states: string[], countryIso2: string }
+ */
+export async function POST(req: Request) {
   try {
-    const body = await request.json().catch(() => ({} as any));
-    const raw = body?.country;
-    const country =
-      typeof raw === "string" ? raw.trim() : undefined;
+    const body = (await req.json().catch(() => ({}))) as StatesRequestBody;
 
-    if (!country) {
+    let iso2 =
+      body.countryIso2 ||
+      body.iso2 ||
+      body.countryCode ||
+      body.cca2 ||
+      undefined;
+
+    const countryName =
+      typeof body.country === "string" && body.country.trim().length > 0
+        ? body.country.trim()
+        : undefined;
+
+    if (!iso2 && !countryName) {
       return NextResponse.json(
-        { error: "Country is required" },
+        { error: "countryIso2 or country is required" },
         { status: 400 }
       );
     }
 
-    // Defensive timeout so the route never hangs
-    const controller = new AbortController();
-    const t = setTimeout(() => controller.abort(), 15_000);
+    // If we only have the country name, resolve it to ISO2 using CSC data
+    if (!iso2 && countryName) {
+      const all = Country.getAllCountries();
+      const queryLc = countryName.toLowerCase();
 
-    const res = await fetch(
-      "https://countriesnow.space/api/v0.1/countries/states",
-      {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ country }),
-        signal: controller.signal,
-      }
-    ).finally(() => clearTimeout(t));
+      const match = all.find((c) => {
+        const nameLc = c.name.toLowerCase();
+        return (
+          nameLc === queryLc ||
+          nameLc.includes(queryLc) ||
+          queryLc.startsWith(nameLc) ||
+          queryLc.endsWith(nameLc)
+        );
+      });
 
-    if (!res.ok) {
-      console.error("Upstream states API error:", res.status);
+      iso2 = match?.isoCode;
+    }
+
+    if (!iso2) {
       return NextResponse.json(
-        { error: "Failed to fetch states" },
-        { status: 502 }
+        { error: "Could not resolve country ISO code" },
+        { status: 400 }
       );
     }
 
-    const json = (await res.json()) as CountriesNowStatesResp;
-    const states =
-      json?.data?.states?.map((s) => s?.name).filter(Boolean) ?? [];
+    const statesRaw = CscState.getStatesOfCountry(iso2);
 
-    return NextResponse.json({ states }, { status: 200 });
-  } catch (err: any) {
-    const aborted = err?.name === "AbortError";
-    console.error("States proxy error:", err);
+    const states = statesRaw
+      .map((s) => s.name?.trim())
+      .filter((name): name is string => !!name)
+      .sort((a, b) => a.localeCompare(b));
+
     return NextResponse.json(
-      { error: aborted ? "Upstream timeout" : "Server error fetching states" },
-      { status: aborted ? 504 : 500 }
+      { states, countryIso2: iso2 },
+      {
+        status: 200,
+        headers: {
+          "Cache-Control":
+            "public, s-maxage=86400, stale-while-revalidate=43200",
+        },
+      }
+    );
+  } catch (err) {
+    console.error("States route error:", err);
+    return NextResponse.json(
+      { error: "Server error fetching states" },
+      { status: 500 }
     );
   }
 }

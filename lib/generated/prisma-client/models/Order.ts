@@ -350,6 +350,7 @@ export type OrderWhereInput = {
   staff?: Prisma.XOR<Prisma.StaffNullableScalarRelationFilter, Prisma.StaffWhereInput> | null
   items?: Prisma.OrderItemListRelationFilter
   receiptEmailStatus?: Prisma.XOR<Prisma.ReceiptEmailStatusNullableScalarRelationFilter, Prisma.ReceiptEmailStatusWhereInput> | null
+  shipment?: Prisma.XOR<Prisma.ShipmentNullableScalarRelationFilter, Prisma.ShipmentWhereInput> | null
 }
 
 export type OrderOrderByWithRelationInput = {
@@ -380,6 +381,7 @@ export type OrderOrderByWithRelationInput = {
   staff?: Prisma.StaffOrderByWithRelationInput
   items?: Prisma.OrderItemOrderByRelationAggregateInput
   receiptEmailStatus?: Prisma.ReceiptEmailStatusOrderByWithRelationInput
+  shipment?: Prisma.ShipmentOrderByWithRelationInput
 }
 
 export type OrderWhereUniqueInput = Prisma.AtLeast<{
@@ -413,6 +415,7 @@ export type OrderWhereUniqueInput = Prisma.AtLeast<{
   staff?: Prisma.XOR<Prisma.StaffNullableScalarRelationFilter, Prisma.StaffWhereInput> | null
   items?: Prisma.OrderItemListRelationFilter
   receiptEmailStatus?: Prisma.XOR<Prisma.ReceiptEmailStatusNullableScalarRelationFilter, Prisma.ReceiptEmailStatusWhereInput> | null
+  shipment?: Prisma.XOR<Prisma.ShipmentNullableScalarRelationFilter, Prisma.ShipmentWhereInput> | null
 }, "id" | "paymentReference">
 
 export type OrderOrderByWithAggregationInput = {
@@ -496,6 +499,7 @@ export type OrderCreateInput = {
   staff?: Prisma.StaffCreateNestedOneWithoutOrdersInput
   items?: Prisma.OrderItemCreateNestedManyWithoutOrderInput
   receiptEmailStatus?: Prisma.ReceiptEmailStatusCreateNestedOneWithoutOrderInput
+  shipment?: Prisma.ShipmentCreateNestedOneWithoutOrderInput
 }
 
 export type OrderUncheckedCreateInput = {
@@ -523,6 +527,7 @@ export type OrderUncheckedCreateInput = {
   offlineSale?: Prisma.OfflineSaleUncheckedCreateNestedOneWithoutOrderInput
   items?: Prisma.OrderItemUncheckedCreateNestedManyWithoutOrderInput
   receiptEmailStatus?: Prisma.ReceiptEmailStatusUncheckedCreateNestedOneWithoutOrderInput
+  shipment?: Prisma.ShipmentUncheckedCreateNestedOneWithoutOrderInput
 }
 
 export type OrderUpdateInput = {
@@ -550,6 +555,7 @@ export type OrderUpdateInput = {
   staff?: Prisma.StaffUpdateOneWithoutOrdersNestedInput
   items?: Prisma.OrderItemUpdateManyWithoutOrderNestedInput
   receiptEmailStatus?: Prisma.ReceiptEmailStatusUpdateOneWithoutOrderNestedInput
+  shipment?: Prisma.ShipmentUpdateOneWithoutOrderNestedInput
 }
 
 export type OrderUncheckedUpdateInput = {
@@ -577,6 +583,7 @@ export type OrderUncheckedUpdateInput = {
   offlineSale?: Prisma.OfflineSaleUncheckedUpdateOneWithoutOrderNestedInput
   items?: Prisma.OrderItemUncheckedUpdateManyWithoutOrderNestedInput
   receiptEmailStatus?: Prisma.ReceiptEmailStatusUncheckedUpdateOneWithoutOrderNestedInput
+  shipment?: Prisma.ShipmentUncheckedUpdateOneWithoutOrderNestedInput
 }
 
 export type OrderCreateManyInput = {
@@ -927,6 +934,20 @@ export type OrderUpdateOneRequiredWithoutReceiptEmailStatusNestedInput = {
   update?: Prisma.XOR<Prisma.XOR<Prisma.OrderUpdateToOneWithWhereWithoutReceiptEmailStatusInput, Prisma.OrderUpdateWithoutReceiptEmailStatusInput>, Prisma.OrderUncheckedUpdateWithoutReceiptEmailStatusInput>
 }
 
+export type OrderCreateNestedOneWithoutShipmentInput = {
+  create?: Prisma.XOR<Prisma.OrderCreateWithoutShipmentInput, Prisma.OrderUncheckedCreateWithoutShipmentInput>
+  connectOrCreate?: Prisma.OrderCreateOrConnectWithoutShipmentInput
+  connect?: Prisma.OrderWhereUniqueInput
+}
+
+export type OrderUpdateOneRequiredWithoutShipmentNestedInput = {
+  create?: Prisma.XOR<Prisma.OrderCreateWithoutShipmentInput, Prisma.OrderUncheckedCreateWithoutShipmentInput>
+  connectOrCreate?: Prisma.OrderCreateOrConnectWithoutShipmentInput
+  upsert?: Prisma.OrderUpsertWithoutShipmentInput
+  connect?: Prisma.OrderWhereUniqueInput
+  update?: Prisma.XOR<Prisma.XOR<Prisma.OrderUpdateToOneWithWhereWithoutShipmentInput, Prisma.OrderUpdateWithoutShipmentInput>, Prisma.OrderUncheckedUpdateWithoutShipmentInput>
+}
+
 export type OrderCreateWithoutCustomerInput = {
   id?: string
   status?: $Enums.OrderStatus
@@ -951,6 +972,7 @@ export type OrderCreateWithoutCustomerInput = {
   staff?: Prisma.StaffCreateNestedOneWithoutOrdersInput
   items?: Prisma.OrderItemCreateNestedManyWithoutOrderInput
   receiptEmailStatus?: Prisma.ReceiptEmailStatusCreateNestedOneWithoutOrderInput
+  shipment?: Prisma.ShipmentCreateNestedOneWithoutOrderInput
 }
 
 export type OrderUncheckedCreateWithoutCustomerInput = {
@@ -977,6 +999,7 @@ export type OrderUncheckedCreateWithoutCustomerInput = {
   offlineSale?: Prisma.OfflineSaleUncheckedCreateNestedOneWithoutOrderInput
   items?: Prisma.OrderItemUncheckedCreateNestedManyWithoutOrderInput
   receiptEmailStatus?: Prisma.ReceiptEmailStatusUncheckedCreateNestedOneWithoutOrderInput
+  shipment?: Prisma.ShipmentUncheckedCreateNestedOneWithoutOrderInput
 }
 
 export type OrderCreateOrConnectWithoutCustomerInput = {
@@ -1056,6 +1079,7 @@ export type OrderCreateWithoutStaffInput = {
   deliveryOption?: Prisma.DeliveryOptionCreateNestedOneWithoutOrdersInput
   items?: Prisma.OrderItemCreateNestedManyWithoutOrderInput
   receiptEmailStatus?: Prisma.ReceiptEmailStatusCreateNestedOneWithoutOrderInput
+  shipment?: Prisma.ShipmentCreateNestedOneWithoutOrderInput
 }
 
 export type OrderUncheckedCreateWithoutStaffInput = {
@@ -1082,6 +1106,7 @@ export type OrderUncheckedCreateWithoutStaffInput = {
   offlineSale?: Prisma.OfflineSaleUncheckedCreateNestedOneWithoutOrderInput
   items?: Prisma.OrderItemUncheckedCreateNestedManyWithoutOrderInput
   receiptEmailStatus?: Prisma.ReceiptEmailStatusUncheckedCreateNestedOneWithoutOrderInput
+  shipment?: Prisma.ShipmentUncheckedCreateNestedOneWithoutOrderInput
 }
 
 export type OrderCreateOrConnectWithoutStaffInput = {
@@ -1134,6 +1159,7 @@ export type OrderCreateWithoutDeliveryOptionInput = {
   staff?: Prisma.StaffCreateNestedOneWithoutOrdersInput
   items?: Prisma.OrderItemCreateNestedManyWithoutOrderInput
   receiptEmailStatus?: Prisma.ReceiptEmailStatusCreateNestedOneWithoutOrderInput
+  shipment?: Prisma.ShipmentCreateNestedOneWithoutOrderInput
 }
 
 export type OrderUncheckedCreateWithoutDeliveryOptionInput = {
@@ -1160,6 +1186,7 @@ export type OrderUncheckedCreateWithoutDeliveryOptionInput = {
   offlineSale?: Prisma.OfflineSaleUncheckedCreateNestedOneWithoutOrderInput
   items?: Prisma.OrderItemUncheckedCreateNestedManyWithoutOrderInput
   receiptEmailStatus?: Prisma.ReceiptEmailStatusUncheckedCreateNestedOneWithoutOrderInput
+  shipment?: Prisma.ShipmentUncheckedCreateNestedOneWithoutOrderInput
 }
 
 export type OrderCreateOrConnectWithoutDeliveryOptionInput = {
@@ -1212,6 +1239,7 @@ export type OrderCreateWithoutItemsInput = {
   deliveryOption?: Prisma.DeliveryOptionCreateNestedOneWithoutOrdersInput
   staff?: Prisma.StaffCreateNestedOneWithoutOrdersInput
   receiptEmailStatus?: Prisma.ReceiptEmailStatusCreateNestedOneWithoutOrderInput
+  shipment?: Prisma.ShipmentCreateNestedOneWithoutOrderInput
 }
 
 export type OrderUncheckedCreateWithoutItemsInput = {
@@ -1238,6 +1266,7 @@ export type OrderUncheckedCreateWithoutItemsInput = {
   refundStatus?: $Enums.RefundStatus | null
   offlineSale?: Prisma.OfflineSaleUncheckedCreateNestedOneWithoutOrderInput
   receiptEmailStatus?: Prisma.ReceiptEmailStatusUncheckedCreateNestedOneWithoutOrderInput
+  shipment?: Prisma.ShipmentUncheckedCreateNestedOneWithoutOrderInput
 }
 
 export type OrderCreateOrConnectWithoutItemsInput = {
@@ -1280,6 +1309,7 @@ export type OrderUpdateWithoutItemsInput = {
   deliveryOption?: Prisma.DeliveryOptionUpdateOneWithoutOrdersNestedInput
   staff?: Prisma.StaffUpdateOneWithoutOrdersNestedInput
   receiptEmailStatus?: Prisma.ReceiptEmailStatusUpdateOneWithoutOrderNestedInput
+  shipment?: Prisma.ShipmentUpdateOneWithoutOrderNestedInput
 }
 
 export type OrderUncheckedUpdateWithoutItemsInput = {
@@ -1306,6 +1336,7 @@ export type OrderUncheckedUpdateWithoutItemsInput = {
   refundStatus?: Prisma.NullableEnumRefundStatusFieldUpdateOperationsInput | $Enums.RefundStatus | null
   offlineSale?: Prisma.OfflineSaleUncheckedUpdateOneWithoutOrderNestedInput
   receiptEmailStatus?: Prisma.ReceiptEmailStatusUncheckedUpdateOneWithoutOrderNestedInput
+  shipment?: Prisma.ShipmentUncheckedUpdateOneWithoutOrderNestedInput
 }
 
 export type OrderCreateWithoutOfflineSaleInput = {
@@ -1332,6 +1363,7 @@ export type OrderCreateWithoutOfflineSaleInput = {
   staff?: Prisma.StaffCreateNestedOneWithoutOrdersInput
   items?: Prisma.OrderItemCreateNestedManyWithoutOrderInput
   receiptEmailStatus?: Prisma.ReceiptEmailStatusCreateNestedOneWithoutOrderInput
+  shipment?: Prisma.ShipmentCreateNestedOneWithoutOrderInput
 }
 
 export type OrderUncheckedCreateWithoutOfflineSaleInput = {
@@ -1358,6 +1390,7 @@ export type OrderUncheckedCreateWithoutOfflineSaleInput = {
   refundStatus?: $Enums.RefundStatus | null
   items?: Prisma.OrderItemUncheckedCreateNestedManyWithoutOrderInput
   receiptEmailStatus?: Prisma.ReceiptEmailStatusUncheckedCreateNestedOneWithoutOrderInput
+  shipment?: Prisma.ShipmentUncheckedCreateNestedOneWithoutOrderInput
 }
 
 export type OrderCreateOrConnectWithoutOfflineSaleInput = {
@@ -1400,6 +1433,7 @@ export type OrderUpdateWithoutOfflineSaleInput = {
   staff?: Prisma.StaffUpdateOneWithoutOrdersNestedInput
   items?: Prisma.OrderItemUpdateManyWithoutOrderNestedInput
   receiptEmailStatus?: Prisma.ReceiptEmailStatusUpdateOneWithoutOrderNestedInput
+  shipment?: Prisma.ShipmentUpdateOneWithoutOrderNestedInput
 }
 
 export type OrderUncheckedUpdateWithoutOfflineSaleInput = {
@@ -1426,6 +1460,7 @@ export type OrderUncheckedUpdateWithoutOfflineSaleInput = {
   refundStatus?: Prisma.NullableEnumRefundStatusFieldUpdateOperationsInput | $Enums.RefundStatus | null
   items?: Prisma.OrderItemUncheckedUpdateManyWithoutOrderNestedInput
   receiptEmailStatus?: Prisma.ReceiptEmailStatusUncheckedUpdateOneWithoutOrderNestedInput
+  shipment?: Prisma.ShipmentUncheckedUpdateOneWithoutOrderNestedInput
 }
 
 export type OrderCreateWithoutReceiptEmailStatusInput = {
@@ -1452,6 +1487,7 @@ export type OrderCreateWithoutReceiptEmailStatusInput = {
   deliveryOption?: Prisma.DeliveryOptionCreateNestedOneWithoutOrdersInput
   staff?: Prisma.StaffCreateNestedOneWithoutOrdersInput
   items?: Prisma.OrderItemCreateNestedManyWithoutOrderInput
+  shipment?: Prisma.ShipmentCreateNestedOneWithoutOrderInput
 }
 
 export type OrderUncheckedCreateWithoutReceiptEmailStatusInput = {
@@ -1478,6 +1514,7 @@ export type OrderUncheckedCreateWithoutReceiptEmailStatusInput = {
   refundStatus?: $Enums.RefundStatus | null
   offlineSale?: Prisma.OfflineSaleUncheckedCreateNestedOneWithoutOrderInput
   items?: Prisma.OrderItemUncheckedCreateNestedManyWithoutOrderInput
+  shipment?: Prisma.ShipmentUncheckedCreateNestedOneWithoutOrderInput
 }
 
 export type OrderCreateOrConnectWithoutReceiptEmailStatusInput = {
@@ -1520,6 +1557,7 @@ export type OrderUpdateWithoutReceiptEmailStatusInput = {
   deliveryOption?: Prisma.DeliveryOptionUpdateOneWithoutOrdersNestedInput
   staff?: Prisma.StaffUpdateOneWithoutOrdersNestedInput
   items?: Prisma.OrderItemUpdateManyWithoutOrderNestedInput
+  shipment?: Prisma.ShipmentUpdateOneWithoutOrderNestedInput
 }
 
 export type OrderUncheckedUpdateWithoutReceiptEmailStatusInput = {
@@ -1546,6 +1584,131 @@ export type OrderUncheckedUpdateWithoutReceiptEmailStatusInput = {
   refundStatus?: Prisma.NullableEnumRefundStatusFieldUpdateOperationsInput | $Enums.RefundStatus | null
   offlineSale?: Prisma.OfflineSaleUncheckedUpdateOneWithoutOrderNestedInput
   items?: Prisma.OrderItemUncheckedUpdateManyWithoutOrderNestedInput
+  shipment?: Prisma.ShipmentUncheckedUpdateOneWithoutOrderNestedInput
+}
+
+export type OrderCreateWithoutShipmentInput = {
+  id?: string
+  status?: $Enums.OrderStatus
+  currency: $Enums.Currency
+  totalAmount: number
+  totalNGN: number
+  paymentMethod: string
+  paymentReference?: string | null
+  paymentProviderId?: string | null
+  paymentVerified?: boolean
+  createdAt?: Date | string
+  guestInfo?: Prisma.NullableJsonNullValueInput | runtime.InputJsonValue
+  channel?: $Enums.OrderChannel
+  deliveryFee?: number | null
+  deliveryDetails?: Prisma.NullableJsonNullValueInput | runtime.InputJsonValue
+  refundedAt?: Date | string | null
+  refundReason?: string | null
+  refundTransactionId?: string | null
+  refundStatus?: $Enums.RefundStatus | null
+  offlineSale?: Prisma.OfflineSaleCreateNestedOneWithoutOrderInput
+  customer?: Prisma.CustomerCreateNestedOneWithoutOrdersInput
+  deliveryOption?: Prisma.DeliveryOptionCreateNestedOneWithoutOrdersInput
+  staff?: Prisma.StaffCreateNestedOneWithoutOrdersInput
+  items?: Prisma.OrderItemCreateNestedManyWithoutOrderInput
+  receiptEmailStatus?: Prisma.ReceiptEmailStatusCreateNestedOneWithoutOrderInput
+}
+
+export type OrderUncheckedCreateWithoutShipmentInput = {
+  id?: string
+  status?: $Enums.OrderStatus
+  currency: $Enums.Currency
+  totalAmount: number
+  totalNGN: number
+  paymentMethod: string
+  paymentReference?: string | null
+  paymentProviderId?: string | null
+  paymentVerified?: boolean
+  createdAt?: Date | string
+  customerId?: string | null
+  guestInfo?: Prisma.NullableJsonNullValueInput | runtime.InputJsonValue
+  staffId?: string | null
+  channel?: $Enums.OrderChannel
+  deliveryOptionId?: string | null
+  deliveryFee?: number | null
+  deliveryDetails?: Prisma.NullableJsonNullValueInput | runtime.InputJsonValue
+  refundedAt?: Date | string | null
+  refundReason?: string | null
+  refundTransactionId?: string | null
+  refundStatus?: $Enums.RefundStatus | null
+  offlineSale?: Prisma.OfflineSaleUncheckedCreateNestedOneWithoutOrderInput
+  items?: Prisma.OrderItemUncheckedCreateNestedManyWithoutOrderInput
+  receiptEmailStatus?: Prisma.ReceiptEmailStatusUncheckedCreateNestedOneWithoutOrderInput
+}
+
+export type OrderCreateOrConnectWithoutShipmentInput = {
+  where: Prisma.OrderWhereUniqueInput
+  create: Prisma.XOR<Prisma.OrderCreateWithoutShipmentInput, Prisma.OrderUncheckedCreateWithoutShipmentInput>
+}
+
+export type OrderUpsertWithoutShipmentInput = {
+  update: Prisma.XOR<Prisma.OrderUpdateWithoutShipmentInput, Prisma.OrderUncheckedUpdateWithoutShipmentInput>
+  create: Prisma.XOR<Prisma.OrderCreateWithoutShipmentInput, Prisma.OrderUncheckedCreateWithoutShipmentInput>
+  where?: Prisma.OrderWhereInput
+}
+
+export type OrderUpdateToOneWithWhereWithoutShipmentInput = {
+  where?: Prisma.OrderWhereInput
+  data: Prisma.XOR<Prisma.OrderUpdateWithoutShipmentInput, Prisma.OrderUncheckedUpdateWithoutShipmentInput>
+}
+
+export type OrderUpdateWithoutShipmentInput = {
+  id?: Prisma.StringFieldUpdateOperationsInput | string
+  status?: Prisma.EnumOrderStatusFieldUpdateOperationsInput | $Enums.OrderStatus
+  currency?: Prisma.EnumCurrencyFieldUpdateOperationsInput | $Enums.Currency
+  totalAmount?: Prisma.FloatFieldUpdateOperationsInput | number
+  totalNGN?: Prisma.IntFieldUpdateOperationsInput | number
+  paymentMethod?: Prisma.StringFieldUpdateOperationsInput | string
+  paymentReference?: Prisma.NullableStringFieldUpdateOperationsInput | string | null
+  paymentProviderId?: Prisma.NullableStringFieldUpdateOperationsInput | string | null
+  paymentVerified?: Prisma.BoolFieldUpdateOperationsInput | boolean
+  createdAt?: Prisma.DateTimeFieldUpdateOperationsInput | Date | string
+  guestInfo?: Prisma.NullableJsonNullValueInput | runtime.InputJsonValue
+  channel?: Prisma.EnumOrderChannelFieldUpdateOperationsInput | $Enums.OrderChannel
+  deliveryFee?: Prisma.NullableFloatFieldUpdateOperationsInput | number | null
+  deliveryDetails?: Prisma.NullableJsonNullValueInput | runtime.InputJsonValue
+  refundedAt?: Prisma.NullableDateTimeFieldUpdateOperationsInput | Date | string | null
+  refundReason?: Prisma.NullableStringFieldUpdateOperationsInput | string | null
+  refundTransactionId?: Prisma.NullableStringFieldUpdateOperationsInput | string | null
+  refundStatus?: Prisma.NullableEnumRefundStatusFieldUpdateOperationsInput | $Enums.RefundStatus | null
+  offlineSale?: Prisma.OfflineSaleUpdateOneWithoutOrderNestedInput
+  customer?: Prisma.CustomerUpdateOneWithoutOrdersNestedInput
+  deliveryOption?: Prisma.DeliveryOptionUpdateOneWithoutOrdersNestedInput
+  staff?: Prisma.StaffUpdateOneWithoutOrdersNestedInput
+  items?: Prisma.OrderItemUpdateManyWithoutOrderNestedInput
+  receiptEmailStatus?: Prisma.ReceiptEmailStatusUpdateOneWithoutOrderNestedInput
+}
+
+export type OrderUncheckedUpdateWithoutShipmentInput = {
+  id?: Prisma.StringFieldUpdateOperationsInput | string
+  status?: Prisma.EnumOrderStatusFieldUpdateOperationsInput | $Enums.OrderStatus
+  currency?: Prisma.EnumCurrencyFieldUpdateOperationsInput | $Enums.Currency
+  totalAmount?: Prisma.FloatFieldUpdateOperationsInput | number
+  totalNGN?: Prisma.IntFieldUpdateOperationsInput | number
+  paymentMethod?: Prisma.StringFieldUpdateOperationsInput | string
+  paymentReference?: Prisma.NullableStringFieldUpdateOperationsInput | string | null
+  paymentProviderId?: Prisma.NullableStringFieldUpdateOperationsInput | string | null
+  paymentVerified?: Prisma.BoolFieldUpdateOperationsInput | boolean
+  createdAt?: Prisma.DateTimeFieldUpdateOperationsInput | Date | string
+  customerId?: Prisma.NullableStringFieldUpdateOperationsInput | string | null
+  guestInfo?: Prisma.NullableJsonNullValueInput | runtime.InputJsonValue
+  staffId?: Prisma.NullableStringFieldUpdateOperationsInput | string | null
+  channel?: Prisma.EnumOrderChannelFieldUpdateOperationsInput | $Enums.OrderChannel
+  deliveryOptionId?: Prisma.NullableStringFieldUpdateOperationsInput | string | null
+  deliveryFee?: Prisma.NullableFloatFieldUpdateOperationsInput | number | null
+  deliveryDetails?: Prisma.NullableJsonNullValueInput | runtime.InputJsonValue
+  refundedAt?: Prisma.NullableDateTimeFieldUpdateOperationsInput | Date | string | null
+  refundReason?: Prisma.NullableStringFieldUpdateOperationsInput | string | null
+  refundTransactionId?: Prisma.NullableStringFieldUpdateOperationsInput | string | null
+  refundStatus?: Prisma.NullableEnumRefundStatusFieldUpdateOperationsInput | $Enums.RefundStatus | null
+  offlineSale?: Prisma.OfflineSaleUncheckedUpdateOneWithoutOrderNestedInput
+  items?: Prisma.OrderItemUncheckedUpdateManyWithoutOrderNestedInput
+  receiptEmailStatus?: Prisma.ReceiptEmailStatusUncheckedUpdateOneWithoutOrderNestedInput
 }
 
 export type OrderCreateManyCustomerInput = {
@@ -1595,6 +1758,7 @@ export type OrderUpdateWithoutCustomerInput = {
   staff?: Prisma.StaffUpdateOneWithoutOrdersNestedInput
   items?: Prisma.OrderItemUpdateManyWithoutOrderNestedInput
   receiptEmailStatus?: Prisma.ReceiptEmailStatusUpdateOneWithoutOrderNestedInput
+  shipment?: Prisma.ShipmentUpdateOneWithoutOrderNestedInput
 }
 
 export type OrderUncheckedUpdateWithoutCustomerInput = {
@@ -1621,6 +1785,7 @@ export type OrderUncheckedUpdateWithoutCustomerInput = {
   offlineSale?: Prisma.OfflineSaleUncheckedUpdateOneWithoutOrderNestedInput
   items?: Prisma.OrderItemUncheckedUpdateManyWithoutOrderNestedInput
   receiptEmailStatus?: Prisma.ReceiptEmailStatusUncheckedUpdateOneWithoutOrderNestedInput
+  shipment?: Prisma.ShipmentUncheckedUpdateOneWithoutOrderNestedInput
 }
 
 export type OrderUncheckedUpdateManyWithoutCustomerInput = {
@@ -1693,6 +1858,7 @@ export type OrderUpdateWithoutStaffInput = {
   deliveryOption?: Prisma.DeliveryOptionUpdateOneWithoutOrdersNestedInput
   items?: Prisma.OrderItemUpdateManyWithoutOrderNestedInput
   receiptEmailStatus?: Prisma.ReceiptEmailStatusUpdateOneWithoutOrderNestedInput
+  shipment?: Prisma.ShipmentUpdateOneWithoutOrderNestedInput
 }
 
 export type OrderUncheckedUpdateWithoutStaffInput = {
@@ -1719,6 +1885,7 @@ export type OrderUncheckedUpdateWithoutStaffInput = {
   offlineSale?: Prisma.OfflineSaleUncheckedUpdateOneWithoutOrderNestedInput
   items?: Prisma.OrderItemUncheckedUpdateManyWithoutOrderNestedInput
   receiptEmailStatus?: Prisma.ReceiptEmailStatusUncheckedUpdateOneWithoutOrderNestedInput
+  shipment?: Prisma.ShipmentUncheckedUpdateOneWithoutOrderNestedInput
 }
 
 export type OrderUncheckedUpdateManyWithoutStaffInput = {
@@ -1791,6 +1958,7 @@ export type OrderUpdateWithoutDeliveryOptionInput = {
   staff?: Prisma.StaffUpdateOneWithoutOrdersNestedInput
   items?: Prisma.OrderItemUpdateManyWithoutOrderNestedInput
   receiptEmailStatus?: Prisma.ReceiptEmailStatusUpdateOneWithoutOrderNestedInput
+  shipment?: Prisma.ShipmentUpdateOneWithoutOrderNestedInput
 }
 
 export type OrderUncheckedUpdateWithoutDeliveryOptionInput = {
@@ -1817,6 +1985,7 @@ export type OrderUncheckedUpdateWithoutDeliveryOptionInput = {
   offlineSale?: Prisma.OfflineSaleUncheckedUpdateOneWithoutOrderNestedInput
   items?: Prisma.OrderItemUncheckedUpdateManyWithoutOrderNestedInput
   receiptEmailStatus?: Prisma.ReceiptEmailStatusUncheckedUpdateOneWithoutOrderNestedInput
+  shipment?: Prisma.ShipmentUncheckedUpdateOneWithoutOrderNestedInput
 }
 
 export type OrderUncheckedUpdateManyWithoutDeliveryOptionInput = {
@@ -1901,6 +2070,7 @@ export type OrderSelect<ExtArgs extends runtime.Types.Extensions.InternalArgs = 
   staff?: boolean | Prisma.Order$staffArgs<ExtArgs>
   items?: boolean | Prisma.Order$itemsArgs<ExtArgs>
   receiptEmailStatus?: boolean | Prisma.Order$receiptEmailStatusArgs<ExtArgs>
+  shipment?: boolean | Prisma.Order$shipmentArgs<ExtArgs>
   _count?: boolean | Prisma.OrderCountOutputTypeDefaultArgs<ExtArgs>
 }, ExtArgs["result"]["order"]>
 
@@ -1990,6 +2160,7 @@ export type OrderInclude<ExtArgs extends runtime.Types.Extensions.InternalArgs =
   staff?: boolean | Prisma.Order$staffArgs<ExtArgs>
   items?: boolean | Prisma.Order$itemsArgs<ExtArgs>
   receiptEmailStatus?: boolean | Prisma.Order$receiptEmailStatusArgs<ExtArgs>
+  shipment?: boolean | Prisma.Order$shipmentArgs<ExtArgs>
   _count?: boolean | Prisma.OrderCountOutputTypeDefaultArgs<ExtArgs>
 }
 export type OrderIncludeCreateManyAndReturn<ExtArgs extends runtime.Types.Extensions.InternalArgs = runtime.Types.Extensions.DefaultArgs> = {
@@ -2012,6 +2183,7 @@ export type $OrderPayload<ExtArgs extends runtime.Types.Extensions.InternalArgs 
     staff: Prisma.$StaffPayload<ExtArgs> | null
     items: Prisma.$OrderItemPayload<ExtArgs>[]
     receiptEmailStatus: Prisma.$ReceiptEmailStatusPayload<ExtArgs> | null
+    shipment: Prisma.$ShipmentPayload<ExtArgs> | null
   }
   scalars: runtime.Types.Extensions.GetPayloadResult<{
     id: string
@@ -2435,6 +2607,7 @@ export interface Prisma__OrderClient<T, Null = never, ExtArgs extends runtime.Ty
   staff<T extends Prisma.Order$staffArgs<ExtArgs> = {}>(args?: Prisma.Subset<T, Prisma.Order$staffArgs<ExtArgs>>): Prisma.Prisma__StaffClient<runtime.Types.Result.GetResult<Prisma.$StaffPayload<ExtArgs>, T, "findUniqueOrThrow", GlobalOmitOptions> | null, null, ExtArgs, GlobalOmitOptions>
   items<T extends Prisma.Order$itemsArgs<ExtArgs> = {}>(args?: Prisma.Subset<T, Prisma.Order$itemsArgs<ExtArgs>>): Prisma.PrismaPromise<runtime.Types.Result.GetResult<Prisma.$OrderItemPayload<ExtArgs>, T, "findMany", GlobalOmitOptions> | Null>
   receiptEmailStatus<T extends Prisma.Order$receiptEmailStatusArgs<ExtArgs> = {}>(args?: Prisma.Subset<T, Prisma.Order$receiptEmailStatusArgs<ExtArgs>>): Prisma.Prisma__ReceiptEmailStatusClient<runtime.Types.Result.GetResult<Prisma.$ReceiptEmailStatusPayload<ExtArgs>, T, "findUniqueOrThrow", GlobalOmitOptions> | null, null, ExtArgs, GlobalOmitOptions>
+  shipment<T extends Prisma.Order$shipmentArgs<ExtArgs> = {}>(args?: Prisma.Subset<T, Prisma.Order$shipmentArgs<ExtArgs>>): Prisma.Prisma__ShipmentClient<runtime.Types.Result.GetResult<Prisma.$ShipmentPayload<ExtArgs>, T, "findUniqueOrThrow", GlobalOmitOptions> | null, null, ExtArgs, GlobalOmitOptions>
   /**
    * Attaches callbacks for the resolution and/or rejection of the Promise.
    * @param onfulfilled The callback to execute when the Promise is resolved.
@@ -2997,6 +3170,25 @@ export type Order$receiptEmailStatusArgs<ExtArgs extends runtime.Types.Extension
    */
   include?: Prisma.ReceiptEmailStatusInclude<ExtArgs> | null
   where?: Prisma.ReceiptEmailStatusWhereInput
+}
+
+/**
+ * Order.shipment
+ */
+export type Order$shipmentArgs<ExtArgs extends runtime.Types.Extensions.InternalArgs = runtime.Types.Extensions.DefaultArgs> = {
+  /**
+   * Select specific fields to fetch from the Shipment
+   */
+  select?: Prisma.ShipmentSelect<ExtArgs> | null
+  /**
+   * Omit specific fields from the Shipment
+   */
+  omit?: Prisma.ShipmentOmit<ExtArgs> | null
+  /**
+   * Choose, which related nodes to fetch as well
+   */
+  include?: Prisma.ShipmentInclude<ExtArgs> | null
+  where?: Prisma.ShipmentWhereInput
 }
 
 /**
