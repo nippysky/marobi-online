@@ -70,14 +70,15 @@ function extractCourierName(raw: unknown): string | null {
   }
   if (!obj || typeof obj !== "object" || Array.isArray(obj)) return null;
 
-  const fromShipbubble = obj.shipbubble?.courierName;
-  const direct = obj.courierName;
-  const fromMeta = obj.shipbubble?.meta?.courierName;
+  const fromShipbubble =
+    obj.shipbubble?.courierName ||
+    obj.shipbubble?.courier_name ||
+    obj.shipbubble?.courier;
+  const direct = obj.courierName || obj.courier_name;
 
   const c =
     (typeof fromShipbubble === "string" && fromShipbubble.trim()) ||
     (typeof direct === "string" && direct.trim()) ||
-    (typeof fromMeta === "string" && fromMeta.trim()) ||
     null;
 
   return c || null;
@@ -192,6 +193,17 @@ async function fetchOrders(): Promise<OrderRow[]> {
       },
       offlineSale: true,
       deliveryOption: { select: { id: true, name: true, provider: true } },
+
+      // ⬇️ NEW: pull shipment fields used by the UI helpers
+      shipment: {
+        select: {
+          provider: true,
+          status: true,
+          externalOrderId: true,
+          trackingUrl: true,
+          courierName: true,
+        },
+      },
     },
   });
 
@@ -203,9 +215,16 @@ async function fetchOrders(): Promise<OrderRow[]> {
         name: `${o.customer.firstName} ${o.customer.lastName}`.trim(),
         email: o.customer.email,
         phone: o.customer.phone,
-        address: normalizeAddress({ customer: o.customer, guestInfo: o.guestInfo }),
+        address: normalizeAddress({
+          customer: o.customer,
+          guestInfo: o.guestInfo,
+        }),
       };
-    } else if (o.guestInfo && typeof o.guestInfo === "object" && !Array.isArray(o.guestInfo)) {
+    } else if (
+      o.guestInfo &&
+      typeof o.guestInfo === "object" &&
+      !Array.isArray(o.guestInfo)
+    ) {
       const gi = o.guestInfo as Record<string, string>;
       customerObj = {
         id: null,
@@ -215,12 +234,19 @@ async function fetchOrders(): Promise<OrderRow[]> {
         address: normalizeAddress({ customer: null, guestInfo: o.guestInfo }),
       };
     } else {
-      customerObj = { id: null, name: "Guest", email: "", phone: "", address: "—" };
+      customerObj = {
+        id: null,
+        name: "Guest",
+        email: "",
+        phone: "",
+        address: "—",
+      };
     }
 
     const totalNGN: number = o.items.reduce((sum, it) => {
       const base = (it.variant?.product.priceNGN ?? 0) * it.quantity;
-      const sizeFeeNGN = o.currency === "NGN" ? (it.sizeModFee ?? 0) * it.quantity : 0;
+      const sizeFeeNGN =
+        (o as any).currency === "NGN" ? (it.sizeModFee ?? 0) * it.quantity : 0;
       return sum + base + sizeFeeNGN;
     }, 0);
 
@@ -239,23 +265,26 @@ async function fetchOrders(): Promise<OrderRow[]> {
       customSize: normalizeCustomSize(it.customSize),
     }));
 
-    const derivedCourier = extractCourierName(o.deliveryDetails as any);
-    const deliveryOption: OrderRow["deliveryOption"] =
-      o.deliveryOption
-        ? {
-            id: o.deliveryOption.id,
-            name: o.deliveryOption.name,
-            provider: o.deliveryOption.provider ?? null,
-            type: "COURIER",
-          }
-        : derivedCourier
-        ? {
-            id: "shipbubble",
-            name: derivedCourier,
-            provider: "Shipbubble",
-            type: "COURIER",
-          }
-        : null;
+    // Prefer courier name from Shipment row; fallback to deliveryDetails
+    const courierFromShipment = o.shipment?.courierName || null;
+    const derivedCourier =
+      courierFromShipment || extractCourierName((o as any).deliveryDetails);
+
+    const deliveryOption: OrderRow["deliveryOption"] = o.deliveryOption
+      ? {
+          id: o.deliveryOption.id,
+          name: o.deliveryOption.name,
+          provider: o.deliveryOption.provider ?? null,
+          type: "COURIER",
+        }
+      : derivedCourier
+      ? {
+          id: "shipbubble",
+          name: derivedCourier,
+          provider: "Shipbubble",
+          type: "COURIER",
+        }
+      : null;
 
     return {
       id: o.id,
@@ -270,12 +299,15 @@ async function fetchOrders(): Promise<OrderRow[]> {
       channel: o.channel as any,
       deliveryOption,
       deliveryFee: o.deliveryFee ?? 0,
-      deliveryDetails: humanizeDeliveryDetails(o.deliveryDetails, deliveryOption ?? undefined),
+      deliveryDetails: humanizeDeliveryDetails(
+        (o as any).deliveryDetails,
+        deliveryOption ?? undefined
+      ),
 
-      // 🔽 Populate UI helpers from DB
-      hasShipbubbleLabel: !!o.shipbubbleOrderId,
-      shipbubbleOrderId: o.shipbubbleOrderId,
-      shipbubbleTrackingUrl: o.shipbubbleTrackingUrl,
+      // ✅ UI helpers derived from Shipment relation
+      hasShipbubbleLabel: !!o.shipment?.externalOrderId,
+      shipbubbleOrderId: o.shipment?.externalOrderId ?? null,
+      shipbubbleTrackingUrl: o.shipment?.trackingUrl ?? null,
     };
   });
 }
