@@ -3,27 +3,23 @@ import { create } from "zustand";
 import { persist, createJSONStorage } from "zustand/middleware";
 import type { Product } from "@/lib/products";
 
-/**
- * A single item in the cart: wraps a Product plus the desired quantity,
- * as well as the specific color and size the user chose.
- * Optionally, customMods for size modifications, plus hasSizeMod and the fee.
- * Also includes per-unit weight so total weight can be derived.
- */
+export type Currency = "NGN" | "USD" | "EUR" | "GBP";
+
 export interface CartItem {
   product: Product;
   quantity: number;
   color: string;
   size: string;
-  price: number;
+  price: number;                 // price *in the item's own currency* when added
+  currency?: Currency;           // <— NEW, optional for backward compatibility
   hasSizeMod: boolean;
   sizeModFee: number;
   customMods?: Record<string, string | number>;
-  unitWeight?: number; // kg per single unit, optional for backwards compatibility
+  unitWeight?: number;
 }
 
 interface CartStoreState {
   items: CartItem[];
-
   addToCart: (item: CartItem) => void;
   removeFromCart: (
     productId: string,
@@ -42,34 +38,33 @@ interface CartStoreState {
   ) => void;
   clearCart: () => void;
   clear: () => void;
-  totalItems: () => number; // sum of quantities
-  totalDistinctItems: () => number; // number of unique entries
+  totalItems: () => number;
+  totalDistinctItems: () => number;
   totalAmount: () => number;
-  totalWeight: () => number; // aggregated weight (kg)
+  totalWeight: () => number;
 }
 
-// deep equality for customMods
 function areCustomModsEqual(
   a?: Record<string, string | number>,
   b?: Record<string, string | number>
 ) {
   if (!a && !b) return true;
   if (!a || !b) return false;
-  const keysA = Object.keys(a);
-  const keysB = Object.keys(b);
-  if (keysA.length !== keysB.length) return false;
-  return keysA.every((k) => a[k] === b[k]);
+  const ka = Object.keys(a), kb = Object.keys(b);
+  if (ka.length !== kb.length) return false;
+  return ka.every((k) => a[k] === b[k]);
 }
 
-// stock helper: supports both inStock and stock shapes
 function getVariantStock(product: Product, color: string, size: string) {
-  const variant = product.variants.find(
-    (v: any) => v.color === color && v.size === size
-  ) as any | undefined;
-  if (!variant) return 0;
-  if (typeof variant.inStock === "number") return variant.inStock;
-  if (typeof variant.stock === "number") return variant.stock;
+  const v = product.variants.find((vv: any) => vv.color === color && vv.size === size) as any | undefined;
+  if (!v) return 0;
+  if (typeof v.inStock === "number") return v.inStock;
+  if (typeof v.stock === "number") return v.stock;
   return 0;
+}
+
+function ensureCurrency(items: CartItem[]): CartItem[] {
+  return (items || []).map((ci) => ({ ...ci, currency: ci.currency || "NGN" }));
 }
 
 export const useCartStore = create<CartStoreState>()(
@@ -78,24 +73,12 @@ export const useCartStore = create<CartStoreState>()(
       items: [],
 
       addToCart: (item) => {
-        const {
-          product,
-          color,
-          size,
-          quantity,
-          price,
-          hasSizeMod,
-          customMods,
-          sizeModFee,
-          unitWeight = 0,
-        } = item;
+        const { product, color, size, quantity, price, hasSizeMod, customMods,
+                sizeModFee, unitWeight = 0, currency } = item;
+
         const items = get().items;
         const maxStock = getVariantStock(product, color, size);
-
-        if (maxStock <= 0) {
-          // out of stock; ignore
-          return;
-        }
+        if (maxStock <= 0) return;
 
         const idx = items.findIndex(
           (ci) =>
@@ -110,13 +93,11 @@ export const useCartStore = create<CartStoreState>()(
           const existing = items[idx];
           const newQty = Math.min(existing.quantity + quantity, maxStock);
           if (newQty <= 0) {
-            set({
-              items: items.filter((_, i) => i !== idx),
-            });
+            set({ items: items.filter((_, i) => i !== idx) });
           } else {
             const updated = [
               ...items.slice(0, idx),
-              { ...existing, quantity: newQty },
+              { ...existing, quantity: newQty, currency: existing.currency || currency || "NGN" },
               ...items.slice(idx + 1),
             ];
             set({ items: updated });
@@ -137,6 +118,7 @@ export const useCartStore = create<CartStoreState>()(
                 sizeModFee,
                 customMods,
                 unitWeight,
+                currency: currency || "NGN",
               },
             ],
           });
@@ -159,14 +141,7 @@ export const useCartStore = create<CartStoreState>()(
         });
       },
 
-      updateQuantity: (
-        productId,
-        color,
-        size,
-        newQty,
-        customMods,
-        hasSizeMod
-      ) => {
+      updateQuantity: (productId, color, size, newQty, customMods, hasSizeMod) => {
         const items = get().items;
         const idx = items.findIndex(
           (ci) =>
@@ -208,27 +183,26 @@ export const useCartStore = create<CartStoreState>()(
       clearCart: () => set({ items: [] }),
       clear: () => set({ items: [] }),
 
-      totalItems: () =>
-        get().items.reduce((sum, it) => sum + it.quantity, 0), // sum quantities
+      totalItems: () => get().items.reduce((s, it) => s + it.quantity, 0),
+      totalDistinctItems: () => get().items.length,
 
-      totalDistinctItems: () => get().items.length, // unique entries
-
-      totalAmount: () =>
-        get().items.reduce(
-          (sum, { price, quantity }) => sum + price * quantity,
-          0
-        ),
+      // totalAmount stays numeric in item currency units; don't use this for display
+      totalAmount: () => get().items.reduce((s, { price, quantity }) => s + price * quantity, 0),
 
       totalWeight: () =>
-        get()
-          .items.reduce(
-            (sum, { unitWeight = 0, quantity }) => sum + unitWeight * quantity,
-            0
-          ),
+        get().items.reduce((s, { unitWeight = 0, quantity }) => s + unitWeight * quantity, 0),
     }),
     {
       name: "cart",
       storage: createJSONStorage(() => localStorage),
+      version: 2,
+      migrate: (persisted: any, fromVersion: number) => {
+        if (!persisted) return persisted;
+        if (fromVersion < 2 && Array.isArray(persisted.items)) {
+          return { ...persisted, items: ensureCurrency(persisted.items) };
+        }
+        return persisted;
+      },
     }
   )
 );

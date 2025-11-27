@@ -48,15 +48,7 @@ export async function POST(req: Request) {
     const isCodLabel =
       typeof body?.isCodLabel === "boolean" ? body.isCodLabel : undefined;
 
-    console.log("[ShipbubbleLabel] Incoming label request:", {
-      requestTokenPreview: trimmedToken
-        ? `${trimmedToken.slice(0, 12)}…`
-        : "(none)",
-      serviceCode,
-      courierId,
-      hasInsuranceCode: !!insuranceCode,
-      isCodLabel,
-    });
+
 
     // Basic required-field validation
     if (!trimmedToken) {
@@ -103,13 +95,6 @@ export async function POST(req: Request) {
       );
     }
 
-    console.log("[ShipbubbleLabel] Calling Shipbubble /shipping/labels with:", {
-      request_token_preview: trimmedToken.slice(0, 12) + "…",
-      service_code: serviceCode,
-      courier_id: courierId,
-      hasInsuranceCode: !!insuranceCode,
-      isCodLabel,
-    });
 
     const resp = await createShipmentLabelExact({
       requestToken: trimmedToken,
@@ -122,13 +107,6 @@ export async function POST(req: Request) {
     // If we got here, Shipbubble said "success".
     usedRequestTokens.add(trimmedToken);
 
-    console.log("[ShipbubbleLabel] Shipbubble label SUCCESS:", {
-      status: resp?.status,
-      message: resp?.message,
-      order_id: resp?.data?.order_id,
-      tracking_url: resp?.data?.tracking_url,
-      courier: resp?.data?.courier?.name || resp?.data?.courier || null,
-    });
 
     // Pass Shipbubble's success envelope through untouched.
     return NextResponse.json(resp, { status: 200 });

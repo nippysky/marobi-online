@@ -131,18 +131,10 @@ async function getOriginAddressCode(): Promise<number> {
     address: originAddress,
   };
 
-  console.log("[Shipbubble][Origin][validate] body:", originBody);
 
   const validated = await validateAddressExact(originBody);
   const code = Number(validated?.address_code || 0);
 
-  console.log("[Shipbubble][Origin][validate] result:", {
-    address_code: code,
-    formatted_address: validated.formatted_address,
-    country: validated.country,
-    state: validated.state,
-    city: validated.city,
-  });
 
   if (!code || Number.isNaN(code)) {
     throw new Error(
@@ -235,32 +227,14 @@ export async function POST(req: Request) {
       address: destAddress,
     };
 
-    console.log("[Shipbubble][Rates][INPUT]", {
-      destinationRaw: destRaw,
-      destinationForValidate: destForValidate,
-      pickupDays,
-      totalWeight,
-      totalValue,
-    });
 
     // 1) Resolve ORIGIN dynamically (source of truth).
     const originCode = await getOriginAddressCode();
 
     // 2) Validate receiver to get address_code & geo hints
-    console.log("[Shipbubble][Destination][validate] body:", destForValidate);
     const validated = await validateAddressExact(destForValidate);
     const receiverCode = validated.address_code;
 
-    console.log("[Shipbubble][Destination][validate] result:", {
-      address_code: receiverCode,
-      formatted_address: validated.formatted_address,
-      country: validated.country,
-      country_code: validated.country_code,
-      state: validated.state,
-      state_code: validated.state_code,
-      city: validated.city,
-      city_code: validated.city_code,
-    });
 
     const countryCode = (
       validated.country_code ||
@@ -356,17 +330,6 @@ export async function POST(req: Request) {
     }
 
     const token = raw?.request_token || null;
-
-    console.log("[Shipbubble][Rates] summary:", {
-      token: mask(token),
-      couriers: (raw?.couriers || []).length,
-      country: countryCode,
-      state: stateName,
-      city: cityName,
-      filter: appliedFilter,
-      originCode,
-      receiverCode,
-    });
 
     const rates =
       (raw?.couriers || []).map((c) => ({

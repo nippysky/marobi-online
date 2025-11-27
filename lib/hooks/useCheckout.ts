@@ -45,6 +45,15 @@ export interface CreateOrderPayload {
   timestamp: string;
   deliveryOptionId?: string;
   paymentReference: string;
+  /**
+   * Total that Paystack was charged in NGN (major units),
+   * same value the UI shows as "≈ ₦X via Paystack".
+   */
+  totalInNaira?: number;
+  // shipping is accepted by the backend; left as any to avoid tight coupling
+  // with the Shipbubble types in the API route.
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  shipping?: any;
 }
 
 export function useCheckout() {

@@ -1,14 +1,14 @@
-// app/api/hero-slides/[id]/route.ts
+// app/api/store-settings/hero-slides/[id]/route.ts
 import { NextResponse } from "next/server";
 import prisma, { prismaReady } from "@/lib/db";
 
 export async function DELETE(
   _req: Request,
-  context: { params: Promise<{ id: string }> }
+  context: { params: { id: string } }
 ) {
   await prismaReady;
 
-  const { id } = await context.params;
+  const { id } = context.params;
 
   if (!id || typeof id !== "string") {
     return NextResponse.json(
@@ -28,6 +28,9 @@ export async function DELETE(
         { status: 404 }
       );
     }
-    return NextResponse.json({ error: "Error deleting slide" }, { status: 500 });
+    return NextResponse.json(
+      { error: "Error deleting slide" },
+      { status: 500 }
+    );
   }
 }

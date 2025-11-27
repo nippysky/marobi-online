@@ -71,7 +71,6 @@ const UserContext = createContext<UserContextValue>({
 // ——— fetcher with debug logging —————————————————————
 
 const fetcher = async (url: string) => {
-  console.log("↗️  fetcher GET", url);
   const res = await fetch(url, { credentials: "include" });
   if (!res.ok) {
     const { error } = await res.json().catch(() => ({}));
@@ -79,7 +78,6 @@ const fetcher = async (url: string) => {
     throw new Error(error || res.statusText);
   }
   const json = await res.json();
-  console.log("✅ fetcher response:", json);
   return json;
 };
 
@@ -109,7 +107,6 @@ export function UserProvider({ children }: { children: ReactNode }) {
   // clear on sign out
   useEffect(() => {
     if (status === "unauthenticated") {
-      console.log("🔄 clearing user context on sign out");
       mutate(undefined, false);
     }
   }, [status, mutate]);

@@ -44,6 +44,11 @@ interface OnlineOrderPayload {
   deliveryFee?: number;
   deliveryOptionId?: string | null;
   paymentReference: string;
+  /**
+   * Total that was actually charged via Paystack in NGN (major units),
+   * i.e. what the frontend shows as "≈ ₦X via Paystack".
+   */
+  totalInNaira?: number;
   shipping?: {
     source?: "shipbubble" | string;
     shipbubble?: ShipbubbleShippingPayload;
@@ -72,6 +77,7 @@ export async function POST(req: NextRequest) {
       deliveryOptionId,
       paymentReference,
       shipping,
+      totalInNaira,
     } = payload;
 
     requestPaymentReference = paymentReference;
@@ -111,10 +117,14 @@ export async function POST(req: NextRequest) {
       return NextResponse.json({ error: msg }, { status: 400 });
     }
 
-    if (String(paystackTx.currency).toUpperCase() !== normalizedCurrency) {
+    const paystackCurrency = String(paystackTx.currency).toUpperCase();
+    // We only require that Paystack uses a supported currency.
+    // The "display currency" for the order is the user's selected currency,
+    // which may be different (e.g. Paystack in NGN, order in EUR).
+    if (!ALLOWED_CURRENCIES.includes(paystackCurrency as AllowedCurrency)) {
       return NextResponse.json(
         {
-          error: `Currency mismatch: expected ${normalizedCurrency}, got ${paystackTx.currency}`,
+          error: `Unsupported Paystack currency: ${paystackTx.currency}`,
         },
         { status: 400 }
       );
@@ -304,7 +314,23 @@ export async function POST(req: NextRequest) {
     const orderTotal =
       itemsSubtotal + (typeof deliveryFee === "number" ? deliveryFee : 0);
 
-    const expectedLowest = toLowest(orderTotal);
+    /**
+     * For amount verification:
+     * - If frontend sent totalInNaira, we trust that as the NGN amount charged
+     *   and compare to Paystack's amount.
+     * - Otherwise, fall back to old behaviour (orderTotal in selected currency).
+     */
+    let expectedLowest: number;
+    if (
+      typeof totalInNaira === "number" &&
+      Number.isFinite(totalInNaira) &&
+      totalInNaira >= 0
+    ) {
+      expectedLowest = toLowest(totalInNaira);
+    } else {
+      expectedLowest = toLowest(orderTotal);
+    }
+
     if (paystackTx.amount !== expectedLowest) {
       try {
         await prisma.orphanPayment.upsert({
@@ -574,7 +600,7 @@ export async function POST(req: NextRequest) {
             (err as any)?.params?.paymentReference ??
             requestPaymentReference;
 
-        if (refFromError) {
+          if (refFromError) {
             const fallbackOrder = await prisma.order.findUnique({
               where: { paymentReference: refFromError as string },
               include: { customer: true },

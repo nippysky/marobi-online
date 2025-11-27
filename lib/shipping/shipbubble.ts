@@ -63,12 +63,6 @@ async function sbFetch<TData>(
         } catch {
           bodyPreview = String(rest.body || "").slice(0, 300);
         }
-        console.log("[Shipbubble][HTTP] request", {
-          url,
-          method: rest.method || "GET",
-          attempt,
-          body: bodyPreview,
-        });
       }
 
       const res = await fetch(url, {
@@ -221,12 +215,6 @@ export async function validateAddressExact(
     ...(typeof input.longitude === "number" ? { longitude: input.longitude } : {}),
   };
 
-  if (DEBUG) {
-    console.log("[Shipbubble][Address][validate] outgoing body:", {
-      ...body,
-      addressSample: body.address.slice(0, 160),
-    });
-  }
 
   try {
     const resp = await sbFetch<ValidateResp>("/shipping/address/validate", {
@@ -244,15 +232,6 @@ export async function validateAddressExact(
       );
     }
 
-    if (DEBUG) {
-      console.log("[Shipbubble][Address][validate] success:", {
-        address_code: data.address_code,
-        formatted_address: data.formatted_address,
-        country: data.country,
-        state: data.state,
-        city: data.city,
-      });
-    }
 
     return data as ValidatedAddressData;
   } catch (err: any) {
@@ -287,7 +266,6 @@ export async function fetchBoxes(): Promise<BoxSize[]> {
   const arr = Array.isArray((resp as any).data)
     ? ((resp as any).data as BoxSize[])
     : [];
-  if (DEBUG) console.log("[Shipbubble][Boxes] fetched:", arr.length);
   return arr;
 }
 
@@ -301,15 +279,7 @@ export function pickBoxForWeight(
   const chosen =
     sorted.find((b) => Number(b.max_weight) >= Number(totalWeightKg)) || null;
 
-  if (DEBUG) {
-    console.log("[Shipbubble][Boxes] pickBoxForWeight:", {
-      totalWeightKg,
-      available: boxes.length,
-      chosen: chosen
-        ? { name: chosen.name, max_weight: chosen.max_weight }
-        : null,
-    });
-  }
+
 
   return chosen;
 }
@@ -333,7 +303,6 @@ export async function fetchCourierIntegrations(): Promise<CourierIntegration[]> 
   const list = Array.isArray((resp as any)?.data)
     ? ((resp as any).data as CourierIntegration[])
     : [];
-  if (DEBUG) console.log("[Shipbubble][Couriers] fetched:", list.length);
   return list;
 }
 
@@ -382,15 +351,6 @@ export type RatesRespRaw = {
 export async function fetchRatesExact(
   body: FetchRatesBody
 ): Promise<RatesRespRaw> {
-  if (DEBUG) {
-    console.log("[Shipbubble][Rates][fetch] body:", {
-      sender_address_code: body.sender_address_code,
-      reciever_address_code: body.reciever_address_code,
-      pickup_date: body.pickup_date,
-      category_id: body.category_id,
-      package_items_count: body.package_items?.length ?? 0,
-    });
-  }
 
   const resp = await sbFetch<RatesRespRaw>("/shipping/fetch_rates", {
     method: "POST",
@@ -398,12 +358,6 @@ export async function fetchRatesExact(
   });
 
   const data = (resp as any).data as RatesRespRaw;
-  if (DEBUG) {
-    console.log("[Shipbubble][Rates][fetch] success:", {
-      token: redact(data?.request_token),
-      couriers: (data?.couriers || []).length,
-    });
-  }
   return data;
 }
 
@@ -412,9 +366,7 @@ export async function fetchRatesForSelected(
   serviceCodesCsv: string,
   body: FetchRatesBody
 ): Promise<RatesRespRaw> {
-  if (DEBUG) {
-    console.log("[Shipbubble][Rates][selected] codes:", serviceCodesCsv);
-  }
+
   const resp = await sbFetch<RatesRespRaw>(
     `/shipping/fetch_rates/${encodeURIComponent(serviceCodesCsv)}`,
     {
@@ -423,12 +375,6 @@ export async function fetchRatesForSelected(
     }
   );
   const data = (resp as any).data as RatesRespRaw;
-  if (DEBUG) {
-    console.log("[Shipbubble][Rates][selected] success:", {
-      token: redact(data?.request_token),
-      couriers: (data?.couriers || []).length,
-    });
-  }
   return data;
 }
 
@@ -505,15 +451,6 @@ export async function createShipmentLabelExact({
   insuranceCode?: string;
   isCodLabel?: boolean;
 }): Promise<ShipbubbleCreateShipmentResponse> {
-  if (DEBUG) {
-    console.log("[Shipbubble][Label][create] about to call API:", {
-      token: redact(requestToken),
-      serviceCode,
-      courierId,
-      hasInsurance: !!insuranceCode,
-      isCodLabel: !!isCodLabel,
-    });
-  }
 
   const body: {
     request_token: string;
@@ -535,13 +472,6 @@ export async function createShipmentLabelExact({
     timeoutMs: 20000,
   });
 
-  if (DEBUG) {
-    console.log("[Shipbubble][Label][create] success:", {
-      order_id: (resp as any)?.data?.order_id,
-      tracking_url: (resp as any)?.data?.tracking_url,
-      status: (resp as any)?.status,
-    });
-  }
 
   return resp as ShipbubbleCreateShipmentResponse;
 }
@@ -557,12 +487,6 @@ export async function cancelShipmentLabel(orderId: string): Promise<void> {
     timeoutMs: 20000,
   });
 
-  if (DEBUG) {
-    console.log("[Shipbubble][Label][cancel] response:", {
-      status: (resp as any)?.status,
-      message: (resp as any)?.message,
-    });
-  }
 }
 
 /* ───────────────────────── List multiple by IDs ────────────────────── */

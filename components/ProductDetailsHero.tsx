@@ -35,7 +35,9 @@ import {
 import { Switch } from "./ui/switch";
 import { Input } from "./ui/input";
 
-const CUSTOM_SIZE_FIELDS = [
+type CustomFieldKey = "chest" | "waist" | "hip" | "length";
+
+const CUSTOM_SIZE_FIELDS: Array<{ name: CustomFieldKey; label: string }> = [
   { name: "chest", label: "Chest/Bust (in)" },
   { name: "waist", label: "Waist (in)" },
   { name: "hip", label: "Hip (in)" },
@@ -51,11 +53,12 @@ interface Props {
 const ProductDetailHero: React.FC<Props> = ({ product, user, categoryName }) => {
   const router = useRouter();
   const { openSizeChart } = useSizeChart();
+  const { currency } = useCurrency(); // single declaration
 
   // media
   const media = useMemo(() => [...(product.images || [])], [product.images]);
-  const [featuredImage, setFeaturedImage] = useState(media[0] || "");
-  const [imgLoading, setImgLoading] = useState(true);
+  const [featuredImage, setFeaturedImage] = useState<string>(media[0] || "");
+  const [imgLoading, setImgLoading] = useState<boolean>(true);
 
   // thumb refs (for auto-centering on active)
   const thumbsRef = useRef<HTMLDivElement | null>(null);
@@ -80,18 +83,21 @@ const ProductDetailHero: React.FC<Props> = ({ product, user, categoryName }) => 
   }, [featuredImage, media]);
 
   // video
-  const hasVideo = !!product.videoUrl;
+  const hasVideo = Boolean(product.videoUrl);
   const [isVideoOpen, setIsVideoOpen] = useState(false);
 
   // stock
   const totalStock = useMemo(
     () =>
-      product.variants.reduce(
-        (sum, v) =>
-          sum +
-          (typeof (v as any).inStock === "number" ? (v as any).inStock : 0),
-        0
-      ),
+      product.variants.reduce((sum, v: any) => {
+        const s =
+          typeof v?.inStock === "number"
+            ? v.inStock
+            : typeof v?.stock === "number"
+            ? v.stock
+            : 0;
+        return sum + s;
+      }, 0),
     [product.variants]
   );
 
@@ -107,7 +113,7 @@ const ProductDetailHero: React.FC<Props> = ({ product, user, categoryName }) => 
   const hasColor = colors.length > 1 || (colors[0] ?? "") !== "";
   const hasSize = sizes.length > 1 || (sizes[0] ?? "") !== "";
 
-  const [selectedColor, setSelectedColor] = useState(
+  const [selectedColor, setSelectedColor] = useState<string>(
     hasColor ? colors[0] : ""
   );
   const availableSizes = useMemo(
@@ -128,7 +134,7 @@ const ProductDetailHero: React.FC<Props> = ({ product, user, categoryName }) => 
   );
   useEffect(() => setSelectedSize(availableSizes[0] || ""), [availableSizes]);
 
-  const enableSizeMod = product.sizeMods;
+  const enableSizeMod = Boolean(product.sizeMods);
   const [customSizeEnabled, setCustomSizeEnabled] = useState(false);
   const [customMods, setCustomMods] = useState<Record<string, string>>({});
 
@@ -140,52 +146,61 @@ const ProductDetailHero: React.FC<Props> = ({ product, user, categoryName }) => 
           (!hasSize || v.size === selectedSize)
       ),
     [product.variants, hasColor, selectedColor, hasSize, selectedSize]
-  );
+  ) as any | undefined;
 
-  const inStock = useMemo(
-    () =>
-      typeof (selectedVariant as any)?.inStock === "number"
-        ? (selectedVariant as any).inStock
-        : totalStock,
-    [selectedVariant, totalStock]
-  );
+  const inStock = useMemo(() => {
+    const s =
+      typeof selectedVariant?.inStock === "number"
+        ? selectedVariant.inStock
+        : typeof selectedVariant?.stock === "number"
+        ? selectedVariant.stock
+        : undefined;
+    return typeof s === "number" ? s : totalStock;
+  }, [selectedVariant, totalStock]);
+
   const outOfStock = inStock === 0;
 
   // qty
-  const [quantity, setQuantity] = useState(1);
+  const [quantity, setQuantity] = useState<number>(1);
   useEffect(() => {
     setQuantity((q) => Math.min(Math.max(1, q), inStock || 1));
   }, [selectedColor, selectedSize, inStock]);
 
-  // pricing
-  const { currency } = useCurrency();
+  // pricing — per-currency price comes from product meta; no FX conversion
   const basePrice =
     (product as any).prices?.[currency] ??
-    Object.values((product as any).prices ?? {})[0] ??
+    (Object.values((product as any).prices ?? {})[0] as number | undefined) ??
     0;
-  const sizeModFee = customSizeEnabled
-    ? parseFloat((basePrice * 0.05).toFixed(2))
-    : 0;
-  const finalPrice = parseFloat((basePrice + sizeModFee).toFixed(2));
+  const sizeModFee = customSizeEnabled ? +(basePrice * 0.05).toFixed(2) : 0;
+  const finalPrice = +(basePrice + sizeModFee).toFixed(2);
   const currentPrice = formatAmount(finalPrice, currency);
 
   const unitWeight =
-    typeof (selectedVariant as any)?.weight === "number"
-      ? (selectedVariant as any).weight
-      : 0;
+    typeof selectedVariant?.weight === "number" ? selectedVariant.weight : 0;
 
   // wishlist
   const [wishLoading, setWishLoading] = useState(false);
   const [isWishlisted, setIsWishlisted] = useState(false);
+
   useEffect(() => {
-    if (user && user.role === "customer" && product.id) {
-      fetch(`/api/account/wishlist/${product.id}`)
-        .then((r) => r.json())
-        .then((d) => setIsWishlisted(d.wishlisted))
-        .catch(() => setIsWishlisted(false));
-    } else {
-      setIsWishlisted(false);
-    }
+    let active = true;
+    const load = async () => {
+      try {
+        if (user && user.role === "customer" && product.id) {
+          const r = await fetch(`/api/account/wishlist/${product.id}`);
+          const d = await r.json();
+          if (active) setIsWishlisted(Boolean(d?.wishlisted));
+        } else {
+          if (active) setIsWishlisted(false);
+        }
+      } catch {
+        if (active) setIsWishlisted(false);
+      }
+    };
+    load();
+    return () => {
+      active = false;
+    };
   }, [user, product.id]);
 
   const toggleWishlist = async () => {
@@ -196,41 +211,36 @@ const ProductDetailHero: React.FC<Props> = ({ product, user, categoryName }) => 
     setWishLoading(true);
     try {
       if (isWishlisted) {
-        await fetch(`/api/account/wishlist/${product.id}`, {
-          method: "DELETE",
-        });
+        await fetch(`/api/account/wishlist/${product.id}`, { method: "DELETE" });
         setIsWishlisted(false);
         toast("Removed from wishlist");
       } else {
-        await fetch(`/api/account/wishlist/${product.id}`, {
-          method: "POST",
-        });
+        await fetch(`/api/account/wishlist/${product.id}`, { method: "POST" });
         setIsWishlisted(true);
         toast.success("Added to wishlist");
       }
     } catch {
       toast.error("Error updating wishlist");
+    } finally {
+      setWishLoading(false);
     }
-    setWishLoading(false);
   };
 
   // cart
   const addToCart = useCartStore((s) => s.addToCart);
 
   const validate = () => {
-    if (outOfStock) return toast.error("Out of stock"), false;
-    if (hasColor && !selectedColor) return toast.error("Select a color"), false;
-    if (hasSize && !selectedSize) return toast.error("Select a size"), false;
-    if (quantity < 1)
-      return toast.error("Quantity must be at least 1"), false;
+    if (outOfStock) return toast.error("Out of stock"), false as const;
+    if (hasColor && !selectedColor) return toast.error("Select a color"), false as const;
+    if (hasSize && !selectedSize) return toast.error("Select a size"), false as const;
+    if (quantity < 1) return toast.error("Quantity must be at least 1"), false as const;
     if (customSizeEnabled) {
       const any = CUSTOM_SIZE_FIELDS.some((f) =>
         (customMods[f.name] ?? "").toString().trim()
       );
-      if (!any)
-        return toast.error("Enter at least one custom measurement"), false;
+      if (!any) return toast.error("Enter at least one custom measurement"), false as const;
     }
-    return true;
+    return true as const;
   };
 
   const handleAddToCart = () => {
@@ -240,7 +250,7 @@ const ProductDetailHero: React.FC<Props> = ({ product, user, categoryName }) => 
       color: selectedColor,
       size: selectedSize,
       quantity,
-      price: finalPrice,
+      price: finalPrice, // stored snapshot; cart/checkout re-derive from product per-currency fields
       hasSizeMod: customSizeEnabled,
       sizeModFee,
       customMods: customSizeEnabled ? customMods : undefined,
@@ -293,12 +303,10 @@ const ProductDetailHero: React.FC<Props> = ({ product, user, categoryName }) => 
 
   return (
     <section className="grid gap-10 lg:grid-cols-[minmax(280px,520px)_1fr] mt-10">
-      {/* Main image (keep these arrows) */}
+      {/* Main image */}
       <div className="lg:sticky lg:top-28">
         <div className="relative w-full mx-auto max-w-[520px] aspect-[3/4] rounded-2xl bg-gray-100 overflow-hidden shadow-sm">
-          <Skeleton
-            className={`absolute inset-0 ${imgLoading ? "" : "hidden"}`}
-          />
+          <Skeleton className={`absolute inset-0 ${imgLoading ? "" : "hidden"}`} />
           {featuredImage ? (
             <Image
               src={featuredImage}
@@ -344,7 +352,7 @@ const ProductDetailHero: React.FC<Props> = ({ product, user, categoryName }) => 
 
       {/* Right column */}
       <div className="space-y-6 w-full">
-        {/* Media thumbnails — smaller size, no arrows, scrollbar hidden */}
+        {/* Media thumbnails */}
         {!!media.length && (
           <div className="space-y-3">
             <p className="font-medium text-gray-700">Media</p>
@@ -432,9 +440,7 @@ const ProductDetailHero: React.FC<Props> = ({ product, user, categoryName }) => 
 
         {/* Title & description */}
         <div>
-          <h1 className="text-2xl font-semibold text-gray-900">
-            {product.name}
-          </h1>
+          <h1 className="text-2xl font-semibold text-gray-900">{product.name}</h1>
           <p className="text-gray-600">{product.description}</p>
         </div>
 
@@ -454,14 +460,8 @@ const ProductDetailHero: React.FC<Props> = ({ product, user, categoryName }) => 
           <div className="flex flex-col md:flex-row md:gap-4 gap-4">
             {hasColor && (
               <div className="flex-1">
-                <label className="block text-sm text-gray-700 mb-1">
-                  Color
-                </label>
-                <Select
-                  value={selectedColor}
-                  onValueChange={setSelectedColor}
-                  aria-label="Select color"
-                >
+                <label className="block text-sm text-gray-700 mb-1">Color</label>
+                <Select value={selectedColor} onValueChange={setSelectedColor} aria-label="Select color">
                   <SelectTrigger>
                     <SelectValue placeholder="Select color" />
                   </SelectTrigger>
@@ -477,9 +477,7 @@ const ProductDetailHero: React.FC<Props> = ({ product, user, categoryName }) => 
             )}
             {hasSize && (
               <div className="flex-1">
-                <label className="block text-sm text-gray-700 mb-1">
-                  Size
-                </label>
+                <label className="block text-sm text-gray-700 mb-1">Size</label>
                 <Select
                   value={selectedSize}
                   onValueChange={setSelectedSize}
@@ -501,9 +499,7 @@ const ProductDetailHero: React.FC<Props> = ({ product, user, categoryName }) => 
             )}
             {enableSizeMod && (
               <div className="flex-1 flex flex-col justify-end">
-                <label className="block text-sm text-gray-700 mb-1">
-                  Custom Size Mods
-                </label>
+                <label className="block text-sm text-gray-700 mb-1">Custom Size Mods</label>
                 <Switch
                   checked={customSizeEnabled}
                   onCheckedChange={(v) => {
@@ -525,9 +521,7 @@ const ProductDetailHero: React.FC<Props> = ({ product, user, categoryName }) => 
               <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
                 {CUSTOM_SIZE_FIELDS.map((f) => (
                   <div key={f.name} className="space-y-1.5">
-                    <label className="block text-xs text-gray-600">
-                      {f.label}
-                    </label>
+                    <label className="block text-xs text-gray-600">{f.label}</label>
                     <Input
                       type="number"
                       inputMode="decimal"
@@ -546,8 +540,7 @@ const ProductDetailHero: React.FC<Props> = ({ product, user, categoryName }) => 
                 ))}
               </div>
               <p className="text-xs text-muted-foreground">
-                Provide any that apply — leave others blank. A 5% tailoring fee
-                is added automatically.
+                Provide any that apply — leave others blank. A 5% tailoring fee is added automatically.
               </p>
             </div>
           )}
@@ -567,17 +560,13 @@ const ProductDetailHero: React.FC<Props> = ({ product, user, categoryName }) => 
             <Button
               variant="outline"
               size="icon"
-              onClick={() =>
-                setQuantity((q) => Math.min(q + 1, inStock))
-              }
+              onClick={() => setQuantity((q) => Math.min(q + 1, inStock))}
               disabled={quantity >= inStock}
               aria-label="Increase quantity"
             >
               +
             </Button>
-            <span className="ml-2 text-xs text-gray-500">
-              {inStock} left
-            </span>
+            <span className="ml-2 text-xs text-gray-500">{inStock} left</span>
           </div>
         </div>
 
@@ -590,11 +579,7 @@ const ProductDetailHero: React.FC<Props> = ({ product, user, categoryName }) => 
           >
             <Tag className="mr-2" /> Buy Now
           </Button>
-          <Button
-            variant="outline"
-            onClick={handleAddToCart}
-            disabled={outOfStock}
-          >
+          <Button variant="outline" onClick={handleAddToCart} disabled={outOfStock}>
             <BsBag className="mr-2" /> Add to Cart
           </Button>
         </div>
@@ -614,10 +599,7 @@ const ProductDetailHero: React.FC<Props> = ({ product, user, categoryName }) => 
       </div>
 
       {isVideoOpen && product.videoUrl && (
-        <VideoModal
-          onClose={() => setIsVideoOpen(false)}
-          videoUrl={product.videoUrl}
-        />
+        <VideoModal onClose={() => setIsVideoOpen(false)} videoUrl={product.videoUrl} />
       )}
     </section>
   );

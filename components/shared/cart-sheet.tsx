@@ -1,6 +1,6 @@
 "use client";
 
-import React, { useEffect, useState, useCallback } from "react";
+import React, { useEffect, useState, useCallback, useMemo } from "react";
 import Image from "next/image";
 import Link from "next/link";
 import { Trash2, TrashIcon, Plus, Minus } from "lucide-react";
@@ -20,13 +20,39 @@ import { formatAmount } from "@/lib/formatCurrency";
 import { useRouter } from "next/navigation";
 import clsx from "clsx";
 
-/** Nice labels for the common custom fields */
 const CUSTOM_LABELS: Record<string, string> = {
   chest: "Chest/Bust",
   waist: "Waist",
   hip: "Hip",
   length: "Length",
 };
+
+// Derive price from product fields for a given currency
+function unitPriceFromProduct(product: any, currency: Currency): number {
+  // Case 1: mapped object like { NGN: 1000, USD: 2, ... }
+  if (product?.prices && typeof product.prices === "object") {
+    const v = product.prices[currency];
+    if (typeof v === "number") return v;
+  }
+  // Case 2: prisma fields (priceNGN, priceUSD, ...)
+  const map: Record<Currency, keyof any> = {
+    NGN: "priceNGN",
+    USD: "priceUSD",
+    EUR: "priceEUR",
+    GBP: "priceGBP",
+  };
+  const field = map[currency];
+  const val = product?.[field];
+  if (typeof val === "number") return val;
+
+  // Fallback: pick any numeric price on product
+  const anyPrice =
+    product?.priceNGN ?? product?.priceUSD ?? product?.priceEUR ?? product?.priceGBP;
+  if (typeof anyPrice === "number") return anyPrice;
+
+  // Last resort: use stored item price
+  return 0;
+}
 
 export function CartSheet({ tone = "dark" }: { tone?: "light" | "dark" }) {
   const router = useRouter();
@@ -37,13 +63,22 @@ export function CartSheet({ tone = "dark" }: { tone?: "light" | "dark" }) {
   const removeFromCart = useCartStore((s) => s.removeFromCart);
   const updateQuantity = useCartStore((s) => s.updateQuantity);
   const clearCart = useCartStore((s) => s.clearCart);
-  const totalAmount = useCartStore((s) => s.totalAmount());
   const distinctCount = useCartStore((s) => s.totalDistinctItems());
 
   const { currency } = useCurrency();
   const currencyCode = currency as Currency;
 
-  const formattedTotal = formatAmount(totalAmount, currencyCode);
+  // Compute sheet total based on *derived* unit prices in current currency
+  const derivedTotal = useMemo(() => {
+    return items.reduce((sum, it) => {
+      const base = unitPriceFromProduct(it.product as any, currencyCode) || it.price || 0;
+      const sizeFee = it.hasSizeMod ? +(base * 0.05).toFixed(2) : 0;
+      const unitFinal = base + sizeFee;
+      return sum + unitFinal * it.quantity;
+    }, 0);
+  }, [items, currencyCode]);
+
+  const formattedTotal = formatAmount(derivedTotal, currencyCode);
 
   const [pendingMap, setPendingMap] = useState<Record<string, boolean>>({});
   const setPending = useCallback((key: string, v: boolean) => {
@@ -132,9 +167,7 @@ function EmptyCart() {
     <div className="flex flex-1 flex-col items-center justify-center px-6 text-center bg-gray-50">
       <BsBag className="w-16 h-16 mb-4 text-gray-300" />
       <h2 className="text-lg font-semibold text-gray-700 mb-2">Your cart is empty</h2>
-      <p className="text-sm text-gray-500 mb-6">
-        Browse our products and add items to your cart.
-      </p>
+      <p className="text-sm text-gray-500 mb-6">Browse our products and add items to your cart.</p>
       <Link href="/all-products" className="w-full max-w-xs">
         <Button className="w-full">Start Shopping</Button>
       </Link>
@@ -142,7 +175,6 @@ function EmptyCart() {
   );
 }
 
-/** Extracted body to keep the top readable; logic unchanged except for custom-size rendering */
 function CartBody({
   items,
   removeFromCart,
@@ -180,11 +212,14 @@ function CartBody({
             customMods,
             price,
             hasSizeMod,
-            sizeModFee,
             unitWeight = 0,
           } = item;
 
-          const formattedUnit = formatAmount(price, currency);
+          // derive current currency unit price
+          const base = unitPriceFromProduct(product as any, currency) || price || 0;
+          const sizeModFee = hasSizeMod ? +(base * 0.05).toFixed(2) : 0;
+          const formattedUnit = formatAmount(base, currency);
+
           const variant = product.variants.find(
             (v: any) => v.color === color && v.size === size
           ) as any | undefined;
@@ -203,16 +238,15 @@ function CartBody({
             ? parseFloat((unitWeight * quantity).toFixed(3))
             : 0;
 
-          // If size-mod is on, show "Custom" instead of the standard size
           const sizeLabel = hasSizeMod ? "Custom" : size;
 
-          // Prepare compact list of entered custom measurements
           const pairs =
             hasSizeMod && customMods
               ? Object.entries(customMods).filter(([_, v]) => String(v ?? "").trim() !== "")
               : [];
 
-          const renderLabel = (k: string) => CUSTOM_LABELS[k] ?? k.replace(/^\w/, (c) => c.toUpperCase());
+          const renderLabel = (k: string) =>
+            CUSTOM_LABELS[k] ?? k.replace(/^\w/, (c) => c.toUpperCase());
 
           return (
             <div key={key} className="py-4" aria-busy={isPending}>
@@ -282,11 +316,8 @@ function CartBody({
                     </>
                   )}
 
-                  {/* optional: show weights */}
                   <div className="mt-1 text-xs text-gray-600">
-                    <div>
-                      Unit weight: {Number.isFinite(unitWeight) ? unitWeight.toFixed(3) : "0.000"}kg
-                    </div>
+                    <div>Unit weight: {Number.isFinite(unitWeight) ? unitWeight.toFixed(3) : "0.000"}kg</div>
                     <div>Total weight: {lineWeight.toFixed(3)}kg</div>
                   </div>
                 </div>

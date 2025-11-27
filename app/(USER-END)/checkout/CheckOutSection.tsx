@@ -1,4 +1,4 @@
-// components/checkout/CheckoutSection.tsx
+// app/(USER-END)/checkout/CheckOutSection.tsx
 "use client";
 
 /**
@@ -7,13 +7,13 @@
  *   - click "Get delivery rates"
  *   - we call /api/shipping/shipbubble/rates
  *
- * This version also:
- *   - Normalizes auto-filled phone numbers (no double country code)
- *   - Shows placeholders to hint the correct phone format
- *   - Adds per-field "required" validation with subtle red hints
- *   - Requires a proper city / town field so Shipbubble can validate addresses
- *   - DOES NOT create Shipbubble labels automatically after payment;
- *     label creation is now admin-only via /api/shipping/shipbubble/labels.
+ * This version:
+ *   - derives product line prices from product per-currency fields (NO FX conversion)
+ *   - converts nothing for products; only formats with active currency
+ *   - delivery options (Shipbubble) are converted into selected currency for UX
+ *   - Naira equivalent is always shown muted under the converted courier fee
+ *   - Delivery Fee in Order Summary uses the converted fee in the selected currency
+ *   - Paystack is always charged in NGN using FX conversion of the total
  */
 
 import React, { useState, useEffect, useMemo, useCallback } from "react";
@@ -36,6 +36,7 @@ import { Button } from "@/components/ui/button";
 import { FaArrowLeftLong } from "react-icons/fa6";
 import { useCartStore, CartItem } from "@/lib/store/cartStore";
 import { useCurrency } from "@/lib/context/currencyContext";
+import type { Currency } from "@/lib/context/currencyContext";
 import { formatAmount } from "@/lib/formatCurrency";
 import { Toaster, toast } from "react-hot-toast";
 import { useSession } from "next-auth/react";
@@ -46,10 +47,15 @@ import {
   CartItemPayload,
   CustomerPayload,
 } from "@/lib/hooks/useCheckout";
+import { useCountryState } from "@/lib/hooks/useCheckoutForm";
+
+// FX utilities – used for delivery options + summary + Paystack amount
 import {
-  useCountryState,
-  useCartTotals,
-} from "@/lib/hooks/useCheckoutForm";
+  loadFx,
+  fxConvert,
+  type FxTable,
+  type Currency as FxCurrency,
+} from "@/lib/fx";
 
 const PaystackButton = dynamic(
   () => import("react-paystack").then((m) => m.PaystackButton),
@@ -85,20 +91,11 @@ const flagEmoji = (iso2: string) =>
       String.fromCodePoint(127397 + char.charCodeAt(0))
     );
 
-/**
- * Normalize stored phone into "local part" without country code.
- *
- * Examples for NG (+234):
- *   "+2348161676591"  -> "8161676591"
- *   "2348161676591"   -> "8161676591"
- *   "08161676591"     -> "8161676591"
- *   "8161676591"      -> "8161676591"
- */
+/** Normalize stored phone into "local part" without country code. */
 function normalizePhoneForInput(raw: string, dialCode: string): string {
   if (!raw) return "";
   const dialDigits = (dialCode || "").replace(/\D/g, "");
   let digits = raw.replace(/\D/g, "");
-
   if (dialDigits && digits.startsWith(dialDigits)) {
     digits = digits.slice(dialDigits.length);
   }
@@ -108,37 +105,111 @@ function normalizePhoneForInput(raw: string, dialCode: string): string {
   return digits;
 }
 
-/** Build a friendly placeholder for the phone input. */
+/** Placeholder hint for phone input */
 function buildPhonePlaceholder(dialCode: string): string {
   if ((dialCode || "").startsWith("+234")) {
-    // Nigeria: user should type without +234 and without leading 0
     return "8112345678";
   }
   return "local number without country code";
+}
+
+/** Derive per-unit price from product fields for current currency */
+function unitPriceFromProduct(product: any, currency: Currency): number {
+  if (product?.prices && typeof product.prices === "object") {
+    const v = product.prices[currency];
+    if (typeof v === "number") return v;
+  }
+  const map: Record<Currency, keyof any> = {
+    NGN: "priceNGN",
+    USD: "priceUSD",
+    EUR: "priceEUR",
+    GBP: "priceGBP",
+  };
+  const field = map[currency];
+  const val = product?.[field];
+  if (typeof val === "number") return val;
+
+  const anyPrice =
+    product?.priceNGN ?? product?.priceUSD ?? product?.priceEUR ?? product?.priceGBP;
+  if (typeof anyPrice === "number") return anyPrice;
+
+  return 0;
 }
 
 export default function CheckoutSection({ user }: Props) {
   const router = useRouter();
   const { data: session } = useSession({ required: false });
   const { currency } = useCurrency();
+  const currencyCode = currency as Currency;
 
-  // Cart & totals
+  // FX state for delivery options + summary + Paystack
+  const [fxTable, setFxTable] = useState<FxTable | null>(null);
+  const [fxError, setFxError] = useState<string | null>(null);
+
+  useEffect(() => {
+    let cancelled = false;
+
+    async function load() {
+      try {
+        setFxError(null);
+        const table = await loadFx(currencyCode as FxCurrency);
+        if (!cancelled) setFxTable(table);
+      } catch (err: any) {
+        console.error("FX load failed:", err);
+        if (!cancelled) {
+          setFxTable(null);
+          setFxError(
+            "Live currency conversion is temporarily unavailable. Delivery fees may show in carrier currency."
+          );
+        }
+      }
+    }
+
+    load();
+    return () => {
+      cancelled = true;
+    };
+  }, [currencyCode]);
+
+  // Cart & clear
   const items = useCartStore((s) => s.items) as CartItem[];
   const clearCart = useCartStore((s) => s.clear) as () => void;
 
+  // === Derive product totals in current currency (NO FX for products) ===
   const {
     itemsSubtotal,
     sizeModTotal,
     totalWeight,
-    total: baseTotal,
-  } = useCartTotals(
-    items.map((it) => ({
-      price: it.price,
-      sizeModFee: it.sizeModFee,
-      quantity: it.quantity,
-      unitWeight: it.unitWeight,
-    }))
-  );
+    baseTotal,
+  } = useMemo(() => {
+    let subtotal = 0;
+    let sizeMods = 0;
+    let weight = 0;
+
+    for (const it of items) {
+      const unitBase =
+        unitPriceFromProduct(it.product as any, currencyCode) ||
+        it.price ||
+        0;
+      const unitSizeFee = it.hasSizeMod
+        ? +(unitBase * 0.05).toFixed(2)
+        : 0;
+
+      subtotal += unitBase * it.quantity;
+      sizeMods += unitSizeFee * it.quantity;
+
+      const uw = Number(it.unitWeight ?? 0);
+      if (Number.isFinite(uw)) weight += uw * it.quantity;
+    }
+
+    const total = subtotal + sizeMods;
+    return {
+      itemsSubtotal: +subtotal.toFixed(2),
+      sizeModTotal: +sizeMods.toFixed(2),
+      totalWeight: +weight.toFixed(3),
+      baseTotal: +total.toFixed(2),
+    };
+  }, [items, currencyCode]);
 
   // Country / state / phone logic
   const {
@@ -153,7 +224,7 @@ export default function CheckoutSection({ user }: Props) {
     phoneOptions,
   } = useCountryState(user?.country, user?.state);
 
-  // Form fields (with auto-populated defaults)
+  // Form fields
   const [firstName, setFirstName] = useState(user?.firstName ?? "");
   const [lastName, setLastName] = useState(user?.lastName ?? "");
   const [email, setEmail] = useState(user?.email ?? "");
@@ -163,18 +234,15 @@ export default function CheckoutSection({ user }: Props) {
   const [houseAddress, setHouseAddress] = useState(
     user?.deliveryAddress ?? ""
   );
-  // NEW: explicit City / Town so Shipbubble gets city + state + country
   const [city, setCity] = useState<string>("");
-
   const [billingSame, setBillingSame] = useState(true);
   const [billingAddress, setBillingAddress] = useState(
     user?.billingAddress ?? ""
   );
 
-  // Turn on error messages once user tries to move forward
   const [showErrors, setShowErrors] = useState(false);
 
-  // Validation helpers
+  // Validation
   const emailRx = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
   const phoneDigits = `${phoneCode}${phoneNumber}`.replace(/\D/g, "");
   const phoneValid = phoneDigits.length >= 8;
@@ -219,7 +287,7 @@ export default function CheckoutSection({ user }: Props) {
     [phoneCode]
   );
 
-  // Derived full address we send to Shipbubble & store on order
+  // Derived full address
   const fullName = `${(firstName || "").trim()} ${(lastName || "").trim()}`.trim();
 
   const singleLineAddress = useMemo(() => {
@@ -232,20 +300,29 @@ export default function CheckoutSection({ user }: Props) {
     return parts.join(", ");
   }, [houseAddress, city, state, country?.name]);
 
-  // Items → optional per-item exposure
+  // Items → shape for rates API
   const packageItems = useMemo(
     () =>
-      items.map((it) => ({
-        name: it.product?.name || "Item",
-        description: it.hasSizeMod ? "Custom sized apparel" : "Cart item",
-        unitWeightKG: Number(it.unitWeight ?? 0) || 0.5,
-        unitAmount: Number(it.price) || 0,
-        quantity: Number(it.quantity) || 1,
-      })),
-    [items]
+      items.map((it) => {
+        const unitBase =
+          unitPriceFromProduct(it.product as any, currencyCode) ||
+          it.price ||
+          0;
+        const unitSizeFee = it.hasSizeMod
+          ? +(unitBase * 0.05).toFixed(2)
+          : 0;
+        const unitFinal = unitBase + unitSizeFee;
+        return {
+          name: it.product?.name || "Item",
+          description: it.hasSizeMod ? "Custom sized apparel" : "Cart item",
+          unitWeightKG: Number(it.unitWeight ?? 0) || 0.5,
+          unitAmount: Number(unitFinal) || 0,
+          quantity: Number(it.quantity) || 1,
+        };
+      }),
+    [items, currencyCode]
   );
 
-  // Ready to fetch rates only when essentials are present
   const formReadyForRates =
     firstName.trim() !== "" &&
     lastName.trim() !== "" &&
@@ -263,80 +340,77 @@ export default function CheckoutSection({ user }: Props) {
   const [requestToken, setRequestToken] = useState<string | null>(null);
   const [boxUsed, setBoxUsed] = useState<any | null>(null);
 
-const getRates = async () => {
-  if (!formReadyForRates) {
-    setShowErrors(true);
-    toast.error("Please complete delivery information first.");
-    return;
-  }
-  try {
-    setRatesLoading(true);
-    setRatesError(null);
-    setSbRates([]);
-    setRequestToken(null);
-    setBoxUsed(null);
-
-    const resp = await fetch("/api/shipping/shipbubble/rates", {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({
-        destination: {
-          name: fullName,
-          email,
-          phone: `${phoneCode}${phoneNumber}`,
-          // Raw line1 from the textarea
-          address: houseAddress,
-          // Extra hints for server-side normalization
-          state,
-          country: country?.name,
-          // (city is optional; you can add it later if you expose a field)
-          // city: cityOrTown,
-        },
-        total_weight_kg: totalWeight,
-        total_value: baseTotal,
-        items: packageItems,
-        pickup_days_from_now: 1,
-      }),
-    });
-
-    const json = await resp.json();
-    if (!resp.ok) {
-      throw new Error(json?.error || "Could not fetch delivery rates.");
+  const getRates = async () => {
+    if (!formReadyForRates) {
+      setShowErrors(true);
+      toast.error("Please complete delivery information first.");
+      return;
     }
+    try {
+      setRatesLoading(true);
+      setRatesError(null);
+      setSbRates([]);
+      setRequestToken(null);
+      setBoxUsed(null);
 
-    setSbRates(Array.isArray(json?.rates) ? json.rates : []);
-    setRequestToken(json?.requestToken || json?.request_token || null);
-    setBoxUsed(json?.box_used || null);
-
-    if ((json?.rates || []).length === 0) {
-      toast("No delivery options available for this address.", {
-        icon: "ℹ️",
+      const resp = await fetch("/api/shipping/shipbubble/rates", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          destination: {
+            name: fullName,
+            email,
+            phone: `${phoneCode}${phoneNumber}`,
+            address: houseAddress, // raw line
+            state,
+            country: country?.name,
+          },
+          total_weight_kg: totalWeight,
+          total_value: baseTotal, // product total in selected currency
+          items: packageItems,
+          pickup_days_from_now: 1,
+        }),
       });
-    } else {
-      toast.success("Delivery options loaded.");
+
+      const json = await resp.json();
+      if (!resp.ok) {
+        throw new Error(json?.error || "Could not fetch delivery rates.");
+      }
+
+      setSbRates(Array.isArray(json?.rates) ? json.rates : []);
+      setRequestToken(json?.requestToken || json?.request_token || null);
+      setBoxUsed(json?.box_used || null);
+
+      if ((json?.rates || []).length === 0) {
+        toast("No delivery options available for this address.", {
+          icon: "ℹ️",
+        });
+      } else {
+        toast.success("Delivery options loaded.");
+      }
+    } catch (e: any) {
+      setRatesError(
+        e?.message ||
+          "Sorry, we couldn't validate the provided address. Please provide a clear and accurate address including the city, state and country of your address."
+      );
+      toast.error(
+        e?.message ||
+          "Sorry, we couldn't validate the provided address. Please provide a clear and accurate address including the city, state and country of your address."
+      );
+    } finally {
+      setRatesLoading(false);
     }
-  } catch (e: any) {
-    setRatesError(
-      e?.message ||
-        "Sorry, we couldn't validate the provided address. Please provide a clear and accurate address including the city, state and country of your address."
-    );
-    toast.error(
-      e?.message ||
-        "Sorry, we couldn't validate the provided address. Please provide a clear and accurate address including the city, state and country of your address."
-    );
-  } finally {
-    setRatesLoading(false);
-  }
-};
+  };
 
-
-  // Selected rate — we keep requestToken/courierId for admin label creation later
+  // Selected rate (fee is stored AS CONVERTED into the current currency)
   type SelectedShipRate = {
     requestToken: string;
     serviceCode: string;
     courierId: string;
-    fee: number;
-    currency: "NGN" | "USD" | "EUR" | "GBP";
+    fee: number; // converted into currencyCode
+    currency: "NGN" | "USD" | "EUR" | "GBP"; // same as currencyCode at selection time
+    originalFee: number;
+    originalCurrency: "NGN" | "USD" | "EUR" | "GBP";
     courierName: string;
     eta?: string | null;
     raw?: any;
@@ -345,9 +419,25 @@ const getRates = async () => {
   const [selectedShipRate, setSelectedShipRate] =
     useState<SelectedShipRate | null>(null);
 
-  // Totals
+  // Converted shipping fee used in summary + Paystack
   const shipFee = selectedShipRate?.fee ?? 0;
   const total = baseTotal + shipFee;
+
+  // Total in Naira for Paystack charging
+  const totalInNaira = useMemo(() => {
+    if (currencyCode === "NGN") return total;
+    if (!fxTable) return total; // fallback; ideally FX is available
+    try {
+      return fxConvert(
+        total,
+        currencyCode as FxCurrency,
+        "NGN",
+        fxTable
+      );
+    } catch {
+      return total;
+    }
+  }, [total, currencyCode, fxTable]);
 
   // Checkout hook
   const { isProcessing, error, result, createOrder, reset } = useCheckout();
@@ -377,7 +467,9 @@ const getRates = async () => {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [total, email]);
 
-  const amountInLowestDenomination = Math.round(total * 100);
+  // ❗ Paystack must receive NGN in kobo
+  const amountInLowestDenomination = Math.round(totalInNaira * 100);
+
   const paystackConfig = useMemo(
     () => ({
       reference: paystackReference,
@@ -388,10 +480,10 @@ const getRates = async () => {
     [paystackReference, email, amountInLowestDenomination, paystackPublicKey]
   );
 
-  // Full delivery address we persist on the order (same shape as Shipbubble sees)
+  // Full delivery address persisted on order
   const deliveryAddressForOrder = singleLineAddress;
 
-  // Payloads for order API
+  // Payloads
   const customerPayload: CustomerPayload = {
     firstName,
     lastName,
@@ -411,19 +503,22 @@ const getRates = async () => {
       const cm = (it as any).customMods as
         | Record<string, string | number>
         | undefined;
-      const payload: CartItemPayload = {
+      const unitBase =
+        unitPriceFromProduct(it.product as any, currencyCode) ||
+        it.price ||
+        0;
+      return {
         productId: it.product.id,
         color: it.color || "N/A",
         size: it.size || "N/A",
         quantity: it.quantity,
         hasSizeMod: !!it.hasSizeMod,
-        sizeModFee: it.sizeModFee || 0,
+        sizeModFee: it.hasSizeMod ? +(unitBase * 0.05).toFixed(2) : 0,
         unitWeight: it.unitWeight ?? 0,
         ...(it.hasSizeMod && cm ? { customMods: { ...cm } } : {}),
       };
-      return payload;
     });
-  }, [items]);
+  }, [items, currencyCode]);
 
   const buildShipbubbleShipping = () => {
     if (!selectedShipRate) return undefined;
@@ -433,6 +528,7 @@ const getRates = async () => {
         requestToken: selectedShipRate.requestToken,
         serviceCode: selectedShipRate.serviceCode,
         courierId: selectedShipRate.courierId,
+        // fee & currency being stored as the user-facing converted values
         fee: selectedShipRate.fee,
         currency: selectedShipRate.currency,
         courierName: selectedShipRate.courierName,
@@ -453,6 +549,12 @@ const getRates = async () => {
                 maxWeight: boxUsed.max_weight,
               }
             : null,
+          fx: {
+            displayCurrency: selectedShipRate.currency,
+            displayFee: selectedShipRate.fee,
+            originalCurrency: selectedShipRate.originalCurrency,
+            originalFee: selectedShipRate.originalFee,
+          },
         },
       },
     };
@@ -495,12 +597,13 @@ const getRates = async () => {
         items: cartItems,
         customer: customerPayload,
         paymentMethod: "Paystack",
-        currency,
+        currency: currencyCode,
         deliveryFee: selectedShipRate.fee,
         timestamp: new Date().toISOString(),
         deliveryOptionId: undefined,
         paymentReference: refString,
-        // @ts-ignore backend accepts `shipping`
+        totalInNaira, // <- NGN total used for Paystack charge
+        // backend accepts `shipping`
         shipping: buildShipbubbleShipping(),
       });
 
@@ -541,12 +644,13 @@ const getRates = async () => {
         items: cartItems,
         customer: customerPayload,
         paymentMethod: "Paystack",
-        currency,
+        currency: currencyCode,
         deliveryFee: selectedShipRate.fee,
         timestamp: new Date().toISOString(),
         deliveryOptionId: undefined,
         paymentReference: lastPaymentReference,
-        // @ts-ignore backend accepts `shipping`
+        totalInNaira, // <- NGN total used for Paystack charge
+        // backend accepts `shipping`
         shipping: buildShipbubbleShipping(),
       });
 
@@ -890,6 +994,12 @@ const getRates = async () => {
                 </div>
               )}
 
+              {fxError && (
+                <p className="mb-3 text-xs text-amber-600">
+                  {fxError}
+                </p>
+              )}
+
               {!ratesLoading &&
                 Array.isArray(sbRates) &&
                 sbRates.length > 0 && (
@@ -899,6 +1009,48 @@ const getRates = async () => {
                         r.courierId || r.courierCode || r.raw?.courier_id
                       }-${r.serviceCode}-${idx}`;
                       const isSelected = selectedShipRate?._id === id;
+
+                      // Original fee from Shipbubble
+                      const originalFee = Number(r.fee) || 0;
+                      const originalCurrency = ((r.currency ||
+                        "NGN") as FxCurrency) as FxCurrency;
+
+                      // Convert to current currency for display / selection
+                      let convertedFee = originalFee;
+                      try {
+                        if (
+                          fxTable &&
+                          originalCurrency !== (currencyCode as FxCurrency)
+                        ) {
+                          convertedFee = fxConvert(
+                            originalFee,
+                            originalCurrency,
+                            currencyCode as FxCurrency,
+                            fxTable
+                          );
+                        }
+                      } catch {
+                        convertedFee = originalFee;
+                      }
+
+                      // Naira equivalent for UX (muted text)
+                      let nairaEquivalent: number | null = null;
+                      try {
+                        if (fxTable) {
+                          nairaEquivalent = fxConvert(
+                            originalFee,
+                            originalCurrency,
+                            "NGN",
+                            fxTable
+                          );
+                        } else if (originalCurrency === "NGN") {
+                          nairaEquivalent = originalFee;
+                        }
+                      } catch {
+                        if (originalCurrency === "NGN") {
+                          nairaEquivalent = originalFee;
+                        }
+                      }
 
                       return (
                         <div
@@ -919,10 +1071,15 @@ const getRates = async () => {
                             <div className="text-sm mt-1">
                               Fee:{" "}
                               {formatAmount(
-                                r.fee,
-                                r.currency || currency
+                                convertedFee,
+                                currencyCode
                               )}
                             </div>
+                            {nairaEquivalent != null && (
+                              <div className="text-xs text-gray-500 mt-0.5">
+                                ≈ {formatAmount(nairaEquivalent, "NGN")} (₦)
+                              </div>
+                            )}
                           </div>
                           <div className="flex items-center">
                             <input
@@ -941,11 +1098,13 @@ const getRates = async () => {
                                     r.courierCode ||
                                     r.raw?.courier_id ||
                                     "",
-                                  fee: Number(r.fee) || 0,
-                                  currency:
-                                    (r.currency as any) ||
-                                    (currency as any) ||
-                                    "NGN",
+                                  // store converted fee + active currency
+                                  fee: convertedFee,
+                                  currency: currencyCode as any,
+                                  // keep original too for reference / audits
+                                  originalFee,
+                                  originalCurrency:
+                                    originalCurrency as SelectedShipRate["originalCurrency"],
                                   courierName: r.courierName,
                                   eta: r.eta,
                                   raw: r.raw,
@@ -991,14 +1150,15 @@ const getRates = async () => {
                       const lineWeight = parseFloat(
                         ((unitWeight * item.quantity) || 0).toFixed(3)
                       );
-                      const cm = (item.customMods as
-                        | Record<string, string | number>
-                        | undefined) || undefined;
-                      const hasAnyCustom =
-                        !!cm &&
-                        Object.values(cm).some(
-                          (v) => `${v ?? ""}`.trim() !== ""
-                        );
+
+                      // derive unit + fee in current currency
+                      const unitBase =
+                        unitPriceFromProduct(item.product as any, currencyCode) ||
+                        item.price ||
+                        0;
+                      const unitSizeFee = item.hasSizeMod
+                        ? +(unitBase * 0.05).toFixed(2)
+                        : 0;
 
                       return (
                         <li
@@ -1030,52 +1190,10 @@ const getRates = async () => {
                                   +5% size-mod fee:{" "}
                                   <span className="font-medium">
                                     {formatAmount(
-                                      item.sizeModFee,
-                                      currency
+                                      unitSizeFee,
+                                      currencyCode
                                     )}
                                   </span>
-                                </div>
-                              )}
-
-                              {item.hasSizeMod && hasAnyCustom && (
-                                <div className="mt-2 rounded-md border border-amber-200 bg-amber-50/60 p-3 text-xs text-amber-900 shadow-sm">
-                                  <div className="font-semibold mb-1">
-                                    Custom measurements
-                                  </div>
-                                  <div className="grid grid-cols-2 gap-x-6 gap-y-1">
-                                    <div>
-                                      <span className="text-amber-800">
-                                        Chest/Bust:
-                                      </span>{" "}
-                                      <span className="font-medium">
-                                        {cm?.chest ?? "-"}
-                                      </span>
-                                    </div>
-                                    <div>
-                                      <span className="text-amber-800">
-                                        Waist:
-                                      </span>{" "}
-                                      <span className="font-medium">
-                                        {cm?.waist ?? "-"}
-                                      </span>
-                                    </div>
-                                    <div>
-                                      <span className="text-amber-800">
-                                        Hip:
-                                      </span>{" "}
-                                      <span className="font-medium">
-                                        {cm?.hip ?? "-"}
-                                      </span>
-                                    </div>
-                                    <div>
-                                      <span className="text-amber-800">
-                                        Length:
-                                      </span>{" "}
-                                      <span className="font-medium">
-                                        {cm?.length ?? "-"}
-                                      </span>
-                                    </div>
-                                  </div>
                                 </div>
                               )}
 
@@ -1087,8 +1205,8 @@ const getRates = async () => {
                           </div>
                           <div className="text-sm font-medium text-gray-900 whitespace-nowrap">
                             {formatAmount(
-                              item.price * item.quantity,
-                              currency
+                              (unitBase + unitSizeFee) * item.quantity,
+                              currencyCode
                             )}
                           </div>
                         </li>
@@ -1106,16 +1224,16 @@ const getRates = async () => {
               <div className="space-y-2 text-sm flex-1">
                 <div className="flex justify-between">
                   <span>Items Subtotal:</span>
-                  <span>{formatAmount(itemsSubtotal, currency)}</span>
+                  <span>{formatAmount(itemsSubtotal, currencyCode)}</span>
                 </div>
                 <div className="flex justify-between">
                   <span>Size Mods:</span>
-                  <span>{formatAmount(sizeModTotal, currency)}</span>
+                  <span>{formatAmount(sizeModTotal, currencyCode)}</span>
                 </div>
                 <div className="flex justify-between">
                   <span>Delivery Fee:</span>
                   <span>
-                    {formatAmount(selectedShipRate?.fee ?? 0, currency)}
+                    {formatAmount(shipFee, currencyCode)}
                   </span>
                 </div>
                 <div className="flex justify-between">
@@ -1124,7 +1242,7 @@ const getRates = async () => {
                 </div>
                 <div className="flex justify-between font-semibold text-lg pt-2 border-t">
                   <span>Total:</span>
-                  <span>{formatAmount(total, currency)}</span>
+                  <span>{formatAmount(total, currencyCode)}</span>
                 </div>
               </div>
 
@@ -1140,7 +1258,7 @@ const getRates = async () => {
                       text={
                         isProcessing || orderCreatingFromReference
                           ? "Finalizing order..."
-                          : `Pay ${formatAmount(total, currency)}`
+                          : `Pay ${formatAmount(total, currencyCode)}`
                       }
                       onSuccess={handlePaystackSuccess}
                       onClose={() => {
@@ -1152,6 +1270,11 @@ const getRates = async () => {
                       className="w-full py-3 rounded-full bg-brand text-white font-medium disabled:opacity-60"
                       disabled={paymentDisabled || !paystackPublicKey}
                     />
+
+                    <p className="mt-1 text-center text-xs text-gray-500">
+                      You’ll be charged approximately{" "}
+                      {formatAmount(totalInNaira, "NGN")} (₦) via Paystack.
+                    </p>
 
                     {orderCreatingFromReference &&
                       lastPaymentReference &&

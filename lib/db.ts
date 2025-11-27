@@ -30,7 +30,6 @@ function getDoCaFromEnv(): string | undefined {
     try {
       const pem = Buffer.from(base64, "base64").toString("utf8");
       if (pem.includes("BEGIN CERTIFICATE")) {
-        console.log("[db] Loaded DO CA from DO_DB_CA_CERT_BASE64");
         return pem;
       }
       console.warn(
@@ -44,7 +43,6 @@ function getDoCaFromEnv(): string | undefined {
   if (pemRaw) {
     const pem = pemRaw.includes("\\n") ? pemRaw.replace(/\\n/g, "\n") : pemRaw;
     if (pem.includes("BEGIN CERTIFICATE")) {
-      console.log("[db] Loaded DO CA from DO_DB_CA_CERT");
       return pem;
     }
     console.warn(
