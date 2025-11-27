@@ -1,9 +1,9 @@
 import React from "react";
 import type { Metadata } from "next";
-import { Facebook, Instagram, Twitter, MessageCircle } from "lucide-react";
 import { Header } from "@/components/shared/header";
 import Footer from "@/components/shared/footer";
 import Link from "next/link";
+import { FaFacebookF, FaInstagram, FaTiktok, FaWhatsapp, FaXTwitter } from "react-icons/fa6";
 
 export const metadata: Metadata = {
   title: "About Marobi",
@@ -65,25 +65,34 @@ export default function AboutMarobi() {
               aria-label="Visit Marobi on Facebook"
               className="flex h-16 w-16 items-center justify-center rounded-2xl border border-gray-200 bg-white shadow-sm transition hover:-translate-y-0.5 hover:shadow-md"
             >
-              <Facebook className="h-6 w-6 text-gray-800" />
+              <FaFacebookF className="h-6 w-6 text-gray-800" />
             </Link>
 
             {/* Instagram */}
             <Link
-              href="#"
+              href="https://www.instagram.com/marobi_rtw"
               aria-label="Visit Marobi on Instagram"
               className="flex h-16 w-16 items-center justify-center rounded-2xl border border-gray-200 bg-white shadow-sm transition hover:-translate-y-0.5 hover:shadow-md"
             >
-              <Instagram className="h-6 w-6 text-gray-800" />
+              <FaInstagram  className="h-6 w-6 text-gray-800" />
             </Link>
 
             {/* X (Twitter) */}
             <Link
-              href="#"
+              href="https://x.com/marobi_rtw"
               aria-label="Visit Marobi on X"
               className="flex h-16 w-16 items-center justify-center rounded-2xl border border-gray-200 bg-white shadow-sm transition hover:-translate-y-0.5 hover:shadow-md"
             >
-              <Twitter className="h-6 w-6 text-gray-800" />
+              <FaXTwitter className="h-6 w-6 text-gray-800" />
+            </Link>
+
+            {/* Tiktok */}
+            <Link
+              href="https://www.tiktok.com/@marobi_rtw"
+              aria-label="Visit Marobi on Tiktok"
+              className="flex h-16 w-16 items-center justify-center rounded-2xl border border-gray-200 bg-white shadow-sm transition hover:-translate-y-0.5 hover:shadow-md"
+            >
+              <FaTiktok className="h-6 w-6 text-gray-800" />
             </Link>
 
             {/* WhatsApp */}
@@ -92,7 +101,7 @@ export default function AboutMarobi() {
               aria-label="Chat with Marobi on WhatsApp"
               className="flex h-16 w-16 items-center justify-center rounded-2xl border border-gray-200 bg-white shadow-sm transition hover:-translate-y-0.5 hover:shadow-md"
             >
-              <MessageCircle className="h-6 w-6 text-gray-800" />
+              <FaWhatsapp className="h-6 w-6 text-gray-800" />
             </Link>
           </div>
         </div>
