@@ -37,7 +37,7 @@ const COLLAPSED_NAV_OFFSET = {
 };
 
 const linkBaseClasses =
-  "tracking-widest font-semibold uppercase py-1 px-3 rounded-full transition duration-300 ease-in-out";
+  "tracking-widest font-bold uppercase py-1 px-3 rounded-full transition duration-300 ease-in-out";
 
 // =====================
 // Brand Components
