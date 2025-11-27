@@ -4,11 +4,11 @@ import prisma, { prismaReady } from "@/lib/db";
 
 export async function DELETE(
   _req: Request,
-  context: { params: { id: string } }
+  { params }: { params: Promise<{ id: string }> }
 ) {
   await prismaReady;
 
-  const { id } = context.params;
+  const { id } = await params;
 
   if (!id || typeof id !== "string") {
     return NextResponse.json(
