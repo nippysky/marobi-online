@@ -53,7 +53,7 @@ interface Props {
 const ProductDetailHero: React.FC<Props> = ({ product, user, categoryName }) => {
   const router = useRouter();
   const { openSizeChart } = useSizeChart();
-  const { currency } = useCurrency(); // single declaration
+  const { currency } = useCurrency();
 
   // media
   const media = useMemo(() => [...(product.images || [])], [product.images]);
@@ -113,26 +113,30 @@ const ProductDetailHero: React.FC<Props> = ({ product, user, categoryName }) => 
   const hasColor = colors.length > 1 || (colors[0] ?? "") !== "";
   const hasSize = sizes.length > 1 || (sizes[0] ?? "") !== "";
 
-  const [selectedColor, setSelectedColor] = useState<string>(
-    hasColor ? colors[0] : ""
-  );
-  const availableSizes = useMemo(
-    () =>
-      hasColor
-        ? Array.from(
-            new Set(
-              product.variants
-                .filter((v) => v.color === selectedColor)
-                .map((v) => v.size)
-            )
-          )
-        : sizes,
-    [hasColor, product.variants, selectedColor, sizes]
-  );
-  const [selectedSize, setSelectedSize] = useState<string>(
-    availableSizes[0] || ""
-  );
-  useEffect(() => setSelectedSize(availableSizes[0] || ""), [availableSizes]);
+  // selection state – start with nothing selected
+  const [selectedColor, setSelectedColor] = useState<string>("");
+  const [selectedSize, setSelectedSize] = useState<string>("");
+
+  // available sizes depend on color when colors exist
+  const availableSizes = useMemo(() => {
+    if (!hasSize) return [];
+    if (hasColor) {
+      if (!selectedColor) return [];
+      return Array.from(
+        new Set(
+          product.variants
+            .filter((v) => v.color === selectedColor)
+            .map((v) => v.size)
+        )
+      );
+    }
+    return sizes;
+  }, [hasSize, hasColor, selectedColor, product.variants, sizes]);
+
+  // whenever color changes, reset size selection
+  useEffect(() => {
+    setSelectedSize("");
+  }, [selectedColor]);
 
   const enableSizeMod = Boolean(product.sizeMods);
   const [customSizeEnabled, setCustomSizeEnabled] = useState(false);
@@ -229,16 +233,35 @@ const ProductDetailHero: React.FC<Props> = ({ product, user, categoryName }) => 
   // cart
   const addToCart = useCartStore((s) => s.addToCart);
 
+  // helpers for validation / button disabling
+  const allCustomMeasurementsFilled = useMemo(
+    () =>
+      CUSTOM_SIZE_FIELDS.every((f) =>
+        (customMods[f.name] ?? "").toString().trim()
+      ),
+    [customMods]
+  );
+
+  const requireColor = hasColor;
+  const requireSize = hasSize;
+  const requireCustom = enableSizeMod && customSizeEnabled;
+
+  const selectionsValid =
+    (!requireColor || !!selectedColor) &&
+    (!requireSize || !!selectedSize) &&
+    (!requireCustom || allCustomMeasurementsFilled) &&
+    quantity >= 1;
+
   const validate = () => {
     if (outOfStock) return toast.error("Out of stock"), false as const;
-    if (hasColor && !selectedColor) return toast.error("Select a color"), false as const;
-    if (hasSize && !selectedSize) return toast.error("Select a size"), false as const;
-    if (quantity < 1) return toast.error("Quantity must be at least 1"), false as const;
-    if (customSizeEnabled) {
-      const any = CUSTOM_SIZE_FIELDS.some((f) =>
-        (customMods[f.name] ?? "").toString().trim()
-      );
-      if (!any) return toast.error("Enter at least one custom measurement"), false as const;
+    if (requireColor && !selectedColor)
+      return toast.error("Select a color"), false as const;
+    if (requireSize && !selectedSize)
+      return toast.error("Select a size"), false as const;
+    if (quantity < 1)
+      return toast.error("Quantity must be at least 1"), false as const;
+    if (requireCustom && !allCustomMeasurementsFilled) {
+      return toast.error("Enter all custom measurements"), false as const;
     }
     return true as const;
   };
@@ -250,7 +273,7 @@ const ProductDetailHero: React.FC<Props> = ({ product, user, categoryName }) => 
       color: selectedColor,
       size: selectedSize,
       quantity,
-      price: finalPrice, // stored snapshot; cart/checkout re-derive from product per-currency fields
+      price: finalPrice,
       hasSizeMod: customSizeEnabled,
       sizeModFee,
       customMods: customSizeEnabled ? customMods : undefined,
@@ -461,7 +484,11 @@ const ProductDetailHero: React.FC<Props> = ({ product, user, categoryName }) => 
             {hasColor && (
               <div className="flex-1">
                 <label className="block text-sm text-gray-700 mb-1">Color</label>
-                <Select value={selectedColor} onValueChange={setSelectedColor} aria-label="Select color">
+                <Select
+                  value={selectedColor || undefined}
+                  onValueChange={setSelectedColor}
+                  aria-label="Select color"
+                >
                   <SelectTrigger>
                     <SelectValue placeholder="Select color" />
                   </SelectTrigger>
@@ -479,9 +506,9 @@ const ProductDetailHero: React.FC<Props> = ({ product, user, categoryName }) => 
               <div className="flex-1">
                 <label className="block text-sm text-gray-700 mb-1">Size</label>
                 <Select
-                  value={selectedSize}
+                  value={selectedSize || undefined}
                   onValueChange={setSelectedSize}
-                  disabled={customSizeEnabled || (hasColor && !selectedColor)}
+                  disabled={hasColor && !selectedColor}
                   aria-label="Select size"
                 >
                   <SelectTrigger>
@@ -499,7 +526,9 @@ const ProductDetailHero: React.FC<Props> = ({ product, user, categoryName }) => 
             )}
             {enableSizeMod && (
               <div className="flex-1 flex flex-col justify-end">
-                <label className="block text-sm text-gray-700 mb-1">Custom Size Mods</label>
+                <label className="block text-sm text-gray-700 mb-1">
+                  Custom Size Mods
+                </label>
                 <Switch
                   checked={customSizeEnabled}
                   onCheckedChange={(v) => {
@@ -540,7 +569,8 @@ const ProductDetailHero: React.FC<Props> = ({ product, user, categoryName }) => 
                 ))}
               </div>
               <p className="text-xs text-muted-foreground">
-                Provide any that apply — leave others blank. A 5% tailoring fee is added automatically.
+                Enter all four measurements to tailor this size. A 5% tailoring
+                fee is added automatically.
               </p>
             </div>
           )}
@@ -575,11 +605,15 @@ const ProductDetailHero: React.FC<Props> = ({ product, user, categoryName }) => 
           <Button
             className="bg-gradient-to-r from-brand to-green-700"
             onClick={handleBuyNow}
-            disabled={outOfStock}
+            disabled={outOfStock || !selectionsValid}
           >
             <Tag className="mr-2" /> Buy Now
           </Button>
-          <Button variant="outline" onClick={handleAddToCart} disabled={outOfStock}>
+          <Button
+            variant="outline"
+            onClick={handleAddToCart}
+            disabled={outOfStock || !selectionsValid}
+          >
             <BsBag className="mr-2" /> Add to Cart
           </Button>
         </div>
@@ -599,7 +633,10 @@ const ProductDetailHero: React.FC<Props> = ({ product, user, categoryName }) => 
       </div>
 
       {isVideoOpen && product.videoUrl && (
-        <VideoModal onClose={() => setIsVideoOpen(false)} videoUrl={product.videoUrl} />
+        <VideoModal
+          onClose={() => setIsVideoOpen(false)}
+          videoUrl={product.videoUrl}
+        />
       )}
     </section>
   );

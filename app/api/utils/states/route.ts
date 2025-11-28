@@ -12,6 +12,15 @@ interface StatesRequestBody {
   country?: string; // human name, e.g. "Nigeria"
 }
 
+function normalizeCountryName(name: string): string {
+  return name
+    .toLowerCase()
+    // strip common noise words & punctuation
+    .replace(/\b(republic|federal|democratic|kingdom|state|states|of|the)\b/g, "")
+    .replace(/[^a-z]/g, "")
+    .trim();
+}
+
 /**
  * POST /api/utils/states
  * Body can be:
@@ -47,17 +56,17 @@ export async function POST(req: Request) {
     // If we only have the country name, resolve it to ISO2 using CSC data
     if (!iso2 && countryName) {
       const all = Country.getAllCountries();
-      const queryLc = countryName.toLowerCase();
+      const queryNorm = normalizeCountryName(countryName);
 
-      const match = all.find((c) => {
-        const nameLc = c.name.toLowerCase();
-        return (
-          nameLc === queryLc ||
-          nameLc.includes(queryLc) ||
-          queryLc.startsWith(nameLc) ||
-          queryLc.endsWith(nameLc)
+      // strict normalized equality first
+      const match =
+        all.find(
+          (c) => normalizeCountryName(c.name) === queryNorm
+        ) ||
+        // as a tiny extra, try plain case-insensitive equality
+        all.find(
+          (c) => c.name.toLowerCase() === countryName.toLowerCase()
         );
-      });
 
       iso2 = match?.isoCode;
     }

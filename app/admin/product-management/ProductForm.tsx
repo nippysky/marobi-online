@@ -25,7 +25,7 @@ import { Button } from "@/components/ui/button";
 import { Plus, X } from "lucide-react";
 import toast from "react-hot-toast";
 
-const CONVENTIONAL_SIZES = ["S", "M", "L", "XL", "XXL", "XXXL"] as const;
+const CONVENTIONAL_SIZES = ["S", "M", "L", "XL", "R", "B"] as const;
 
 interface Props {
   initialProduct?: ProductPayload;
@@ -39,9 +39,12 @@ export default function ProductForm({
   onSave,
 }: Props) {
   const [name, setName] = useState(initialProduct?.name ?? "");
+
+  // Category: start empty so user must explicitly choose
   const [category, setCategory] = useState<string>(
-    initialProduct?.category ?? categories[0]?.slug ?? ""
+    initialProduct?.category ?? ""
   );
+
   const [description, setDescription] = useState(
     initialProduct?.description ?? ""
   );
@@ -63,9 +66,12 @@ export default function ProductForm({
         ? String(initialProduct.price.GBP)
         : "",
   });
-  const [status, setStatus] = useState<ProductPayload["status"]>(
-    initialProduct?.status ?? "Draft"
+
+  // Status: allow "" initially for placeholder, then require selection
+  const [status, setStatus] = useState<ProductPayload["status"] | "">(
+    initialProduct?.status ?? ""
   );
+
   const [sizeMods, setSizeMods] = useState(initialProduct?.sizeMods ?? false);
   const initialHasColors = (initialProduct?.colors?.length ?? 0) > 0;
   const [hasColors, setHasColors] = useState(initialHasColors);
@@ -80,7 +86,7 @@ export default function ProductForm({
   useEffect(() => {
     if (hasColors && colors.length === 0) setColors([""]);
     if (!hasColors) setColors([]);
-  }, [hasColors]);
+  }, [hasColors, colors.length]);
 
   const [sizeStocks, setSizeStocks] = useState<Record<string, string>>({
     ...(initialProduct?.sizeStocks ?? {}),
@@ -99,13 +105,17 @@ export default function ProductForm({
   const [saving, setSaving] = useState(false);
 
   const isFormValid = useMemo(() => {
-    if (!name.trim() || !category || !description.trim()) return false;
+    // category + status must be selected
+    if (!name.trim() || !category || !description.trim() || !status) return false;
     if (!weight || isNaN(Number(weight)) || Number(weight) <= 0) return false;
+
     for (const cur of ["NGN", "USD", "EUR", "GBP"] as const) {
       const num = Number(price[cur]);
       if (!price[cur] || isNaN(num) || num < 1) return false;
     }
+
     if (hasColors && colors.filter((c) => c.trim()).length === 0) return false;
+
     for (const sz of CONVENTIONAL_SIZES) {
       if (
         sizeEnabled[sz] &&
@@ -114,16 +124,20 @@ export default function ProductForm({
         return false;
       }
     }
+
     for (const lbl of customSizes) {
       if (!lbl.trim()) return false;
       if (!sizeStocks[lbl] || isNaN(Number(sizeStocks[lbl]))) return false;
     }
+
     if (images.length === 0 || !images[0]) return false;
+
     return true;
   }, [
     name,
     category,
     description,
+    status,
     price,
     hasColors,
     colors,
@@ -164,7 +178,7 @@ export default function ProductForm({
   async function handleSave() {
     if (!isFormValid) {
       toast.error(
-        "Please fill all required fields, ensure prices ≥ 1, and weight is provided."
+        "Please fill all required fields, ensure prices ≥ 1, weight is provided, and status/category are selected."
       );
       return;
     }
@@ -180,7 +194,7 @@ export default function ProductForm({
         EUR: parseFloat(price.EUR),
         GBP: parseFloat(price.GBP),
       },
-      status,
+      status: status as ProductPayload["status"],
       sizeMods,
       colors: hasColors
         ? colors.map((c) => c.trim()).filter((c) => c)
@@ -216,6 +230,8 @@ export default function ProductForm({
             disabled={saving}
           />
         </div>
+
+        {/* Category Select */}
         <div
           className={`flex flex-col space-y-1 ${
             saving ? "animate-pulse" : ""
@@ -223,7 +239,7 @@ export default function ProductForm({
         >
           <Label>Category *</Label>
           <Select
-            value={category}
+            value={category || undefined}
             onValueChange={setCategory}
             disabled={saving}
           >
@@ -239,6 +255,8 @@ export default function ProductForm({
             </SelectContent>
           </Select>
         </div>
+
+        {/* Status Select */}
         <div
           className={`flex flex-col space-y-1 ${
             saving ? "animate-pulse" : ""
@@ -246,8 +264,8 @@ export default function ProductForm({
         >
           <Label>Status *</Label>
           <Select
-            value={status}
-            onValueChange={(v) => setStatus(v as any)}
+            value={status || undefined}
+            onValueChange={(v) => setStatus(v as ProductPayload["status"])}
             disabled={saving}
           >
             <SelectTrigger>
@@ -262,6 +280,7 @@ export default function ProductForm({
             </SelectContent>
           </Select>
         </div>
+
         <div className="flex items-center space-x-2">
           <Switch
             checked={sizeMods}
@@ -332,6 +351,7 @@ export default function ProductForm({
             ))}
           </div>
         )}
+
         {(["NGN", "USD", "EUR", "GBP"] as const).map((cur) => (
           <div key={cur} className="flex flex-col space-y-1">
             <Label>{cur} Price *</Label>
@@ -347,6 +367,7 @@ export default function ProductForm({
             />
           </div>
         ))}
+
         <div className="md:col-span-2 flex flex-col space-y-1">
           <Label>Description *</Label>
           <Textarea
@@ -406,6 +427,7 @@ export default function ProductForm({
             ))}
           </div>
         </div>
+
         <div className="md:col-span-2 flex justify-between items-center">
           <Label>Custom Sizes</Label>
           <Button
@@ -417,6 +439,7 @@ export default function ProductForm({
             <Plus className="h-5 w-5 text-indigo-600" />
           </Button>
         </div>
+
         {customSizes.map((label, i) => (
           <div key={i} className="flex items-center space-x-2">
             <Input
@@ -460,6 +483,7 @@ export default function ProductForm({
             </Button>
           </div>
         ))}
+
         <div className="md:col-span-2">
           <Label>Images *</Label>
           <div className="grid grid-cols-4 gap-4 mt-2">

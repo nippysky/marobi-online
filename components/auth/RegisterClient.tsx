@@ -90,9 +90,12 @@ export default function RegisterClient() {
         if (!res.ok) throw new Error();
         const data: CountryData[] = await res.json();
         setCountryList(data);
-        // default to Nigeria
-        const ng = data.find((c) => c.name === "Nigeria") ?? null;
+
+        // default to Nigeria if available
+        const ng =
+          data.find((c) => c.name.toLowerCase() === "nigeria") ?? data[0] ?? null;
         setCountry(ng || null);
+
         // set default dial (normalize in case API includes '+')
         if (ng?.callingCodes?.length) {
           setPhoneCode(normalizeDial(ng.callingCodes[0]));
@@ -104,19 +107,26 @@ export default function RegisterClient() {
     load();
   }, []);
 
-  // ── When country changes: fetch states + reset phoneCode ──────────
+  // ── When country changes: fetch states + reset phoneCode & state ───
   useEffect(() => {
     if (!country) {
       setStateList([]);
+      setStateVal("");
       return;
     }
-    // fetch states
+
+    // clear any previously selected state
+    setStateVal("");
+
     (async () => {
       try {
         const res = await fetch("/api/utils/states", {
           method: "POST",
           headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ country: country.name }),
+          body: JSON.stringify({
+            countryIso2: country.iso2, // use ISO2 for precise mapping
+            country: country.name,     // optional, for logging/fallback
+          }),
         });
         if (!res.ok) throw new Error();
         const { states } = await res.json();
@@ -126,6 +136,7 @@ export default function RegisterClient() {
         toast.error("Could not load states.");
       }
     })();
+
     // reset phone code (normalize to avoid '++')
     if (country.callingCodes.length) {
       setPhoneCode(normalizeDial(country.callingCodes[0]));
@@ -236,7 +247,7 @@ export default function RegisterClient() {
               <Skeleton className="h-10 w-full" />
             ) : (
               <Select
-                value={country?.name ?? ""}
+                value={country?.name ?? undefined}
                 onValueChange={(val) =>
                   setCountry(countryList.find((c) => c.name === val) ?? null)
                 }
@@ -247,7 +258,7 @@ export default function RegisterClient() {
                 </SelectTrigger>
                 <SelectContent>
                   {countryList.map((c) => (
-                    <SelectItem key={c.name} value={c.name}>
+                    <SelectItem key={c.iso2} value={c.name}>
                       {c.name}
                     </SelectItem>
                   ))}
@@ -262,9 +273,9 @@ export default function RegisterClient() {
               <Skeleton className="h-10 w-full" />
             ) : (
               <Select
-                value={stateVal}
+                value={stateVal || undefined}
                 onValueChange={setStateVal}
-                disabled={loading}
+                disabled={loading || stateList.length === 0}
               >
                 <SelectTrigger className="w-full">
                   <SelectValue placeholder="Select state" />
@@ -317,7 +328,9 @@ export default function RegisterClient() {
                 type="tel"
                 placeholder="8012345678"
                 value={phoneNumber}
-                onChange={(e) => setPhoneNumber(e.target.value.replace(/[^\d]/g, ""))}
+                onChange={(e) =>
+                  setPhoneNumber(e.target.value.replace(/[^\d]/g, ""))
+                }
                 required
                 disabled={loading}
               />
