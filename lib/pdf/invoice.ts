@@ -5,6 +5,7 @@
 //  - Size-mod fee
 //  - Custom measurements
 //  - Courier name (Shipbubble or legacy delivery options)
+//  - Transaction / Paystack fee in the totals
 // Uses Montserrat from /public/fonts if available, with sensible fallbacks.
 
 import PDFDocument from "pdfkit/js/pdfkit.standalone.js";
@@ -59,6 +60,7 @@ export async function generateInvoicePDF({
   recipient,
   currency,
   deliveryFee,
+  transactionFee,
 }: {
   order: {
     id: string;
@@ -88,6 +90,8 @@ export async function generateInvoicePDF({
   };
   currency: "NGN" | "USD" | "EUR" | "GBP" | string;
   deliveryFee: number;
+  /** Optional gateway / Paystack transaction fee (in the same currency). */
+  transactionFee?: number;
 }): Promise<Buffer> {
   // Courier name (for header).
   const courierName = getCourierNameFromOrder(order) || "—";
@@ -155,7 +159,16 @@ export async function generateInvoicePDF({
 
   const subtotal = Number(order.totalAmount ?? 0);
   const shipping = Number(deliveryFee ?? 0);
-  const total = +(subtotal + shipping).toFixed(2);
+
+  // Transaction / gateway fee – prefer explicit param, fall back to order fields.
+  const gatewayFee = Number(
+    transactionFee ??
+      (order as any).transactionFee ??
+      (order as any).paystackFeeInNaira ??
+      0
+  );
+
+  const total = +(subtotal + shipping + gatewayFee).toFixed(2);
 
   const chunks: Buffer[] = [];
   const bufferPromise = new Promise<Buffer>((resolve, reject) => {
@@ -402,6 +415,7 @@ export async function generateInvoicePDF({
 
   row("Subtotal:", subtotal);
   row("Shipping:", shipping);
+  row("Transaction Fee:", gatewayFee);
   row("Total:", total, true);
 
   doc

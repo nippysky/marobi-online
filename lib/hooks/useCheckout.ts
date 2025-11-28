@@ -50,6 +50,11 @@ export interface CreateOrderPayload {
    * same value the UI shows as "≈ ₦X via Paystack".
    */
   totalInNaira?: number;
+  /**
+   * Paystack transaction fee (gateway charge) included inside totalInNaira,
+   * in NGN (major units). Used for transparent display (e.g. receipts).
+   */
+  paystackFeeInNaira?: number;
   // shipping is accepted by the backend; left as any to avoid tight coupling
   // with the Shipbubble types in the API route.
   // eslint-disable-next-line @typescript-eslint/no-explicit-any

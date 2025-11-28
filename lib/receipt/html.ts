@@ -40,16 +40,23 @@ interface RenderReceiptArgs {
     courierName?: string;
     summary?: string;
   };
+  /** Optional gateway / Paystack transaction fee (in the same currency). */
+  transactionFee?: number;
 }
 
 /** Format money with symbol and thousands separators. */
 function moneyLabel(currency: string, amount: number): string {
   const c = (currency || "NGN").toUpperCase();
   const symbol =
-    c === "NGN" ? "₦" :
-    c === "USD" ? "$" :
-    c === "EUR" ? "€" :
-    c === "GBP" ? "£" : "";
+    c === "NGN"
+      ? "₦"
+      : c === "USD"
+      ? "$"
+      : c === "EUR"
+      ? "€"
+      : c === "GBP"
+      ? "£"
+      : "";
   const formatted = Number(amount || 0).toLocaleString();
   if (!symbol && c === "NGN") return `NGN ${formatted}`;
   if (!symbol) return `${c} ${formatted}`;
@@ -86,7 +93,8 @@ function getCourierNameFromOrder(order: AnyOrder): string | null {
     s.courier_name, // defensive alias
     s.provider === "SHIPBUBBLE" ? s.serviceCode : undefined, // last-ditch
   ];
-  for (const c of shipCandidates) if (typeof c === "string" && c.trim()) return c.trim();
+  for (const c of shipCandidates)
+    if (typeof c === "string" && c.trim()) return c.trim();
 
   // 2/3) Legacy snapshot JSON from checkout
   const details = parseDeliveryDetails(order?.deliveryDetails);
@@ -98,7 +106,8 @@ function getCourierNameFromOrder(order: AnyOrder): string | null {
     details.courierName,
     details.courier_name,
   ];
-  for (const c of detCandidates) if (typeof c === "string" && c.trim()) return c.trim();
+  for (const c of detCandidates)
+    if (typeof c === "string" && c.trim()) return c.trim();
 
   // 4) Manual delivery option row
   const optName = order?.deliveryOption?.name;
@@ -114,11 +123,23 @@ export function renderReceiptHTML({
   deliveryFee,
   assetBaseUrl,
   shipping,
+  transactionFee,
 }: RenderReceiptArgs): string {
-  const name = `${recipient.firstName || ""} ${recipient.lastName || ""}`.trim();
+  const name = `${recipient.firstName || ""} ${
+    recipient.lastName || ""
+  }`.trim();
   const subtotal = Number(order.totalAmount ?? 0);
   const shipFee = Number(deliveryFee ?? order.deliveryFee ?? 0);
-  const total = +(subtotal + shipFee).toFixed(2);
+
+  // Transaction / gateway fee – prefer explicit param, fall back to order fields if present.
+  const txFee = Number(
+    transactionFee ??
+      (order as any).transactionFee ??
+      (order as any).paystackFeeInNaira ??
+      0
+  );
+
+  const total = +(subtotal + shipFee + txFee).toFixed(2);
 
   // Priority: explicit shipping override -> order-derived
   const courierName =
@@ -129,6 +150,7 @@ export function renderReceiptHTML({
   const symbolTotal = moneyLabel(currency, total);
   const symbolSubtotal = moneyLabel(currency, subtotal);
   const symbolShipping = moneyLabel(currency, shipFee);
+  const symbolTx = moneyLabel(currency, txFee);
 
   const orderDate = safeDate(order.createdAt);
   const orderId = order.id || "";
@@ -230,17 +252,18 @@ export function renderReceiptHTML({
             </tr>
           </thead>
           <tbody>
-            ${items.map((it: any) => {
-              const parts: string[] = [];
-              if (it?.color) parts.push(`Color: ${it.color}`);
-              if (it?.size) parts.push(`Size: ${it.size}`);
-              const sub = parts.join(" • ");
-              const lineTotal = moneyLabel(currency, it?.lineTotal ?? 0);
-              const sizeModLine =
-                it?.hasSizeMod && it?.sizeModFee
-                  ? `<div class="item-sub" style="color:#92400e;">+5% size-mod fee included</div>`
-                  : "";
-              return `
+            ${items
+              .map((it: any) => {
+                const parts: string[] = [];
+                if (it?.color) parts.push(`Color: ${it.color}`);
+                if (it?.size) parts.push(`Size: ${it.size}`);
+                const sub = parts.join(" • ");
+                const lineTotal = moneyLabel(currency, it?.lineTotal ?? 0);
+                const sizeModLine =
+                  it?.hasSizeMod && it?.sizeModFee
+                    ? `<div class="item-sub" style="color:#92400e;">+5% size-mod fee included</div>`
+                    : "";
+                return `
                 <tr>
                   <td>
                     <div class="item-name">${it?.name || ""}</div>
@@ -251,13 +274,15 @@ export function renderReceiptHTML({
                   <td style="text-align:right;">${lineTotal}</td>
                 </tr>
               `;
-            }).join("")}
+              })
+              .join("")}
           </tbody>
         </table>
 
         <div class="totals">
           <div class="totals-row"><span>Subtotal</span><span>${symbolSubtotal}</span></div>
           <div class="totals-row"><span>Shipping</span><span>${symbolShipping}</span></div>
+          <div class="totals-row"><span>Transaction Fee</span><span>${symbolTx}</span></div>
           <div class="totals-row" style="margin-top:6px;"><span><strong>Total</strong></span><span class="total-amount">${symbolTotal}</span></div>
         </div>
 
@@ -274,8 +299,14 @@ export function renderReceiptHTML({
             <div class="info-label">Billing Address</div>
             <div class="info-value">
               <div>${name || ""}</div>
-              ${recipient.billingAddress ? `<div style="margin-top:2px;">${recipient.billingAddress}</div>` : ""}
-              <div style="margin-top:2px;color:${MUTED};font-size:12px;">${recipient.email || ""}</div>
+              ${
+                recipient.billingAddress
+                  ? `<div style="margin-top:2px;">${recipient.billingAddress}</div>`
+                  : ""
+              }
+              <div style="margin-top:2px;color:${MUTED};font-size:12px;">${
+                recipient.email || ""
+              }</div>
             </div>
           </div>
 
@@ -283,8 +314,14 @@ export function renderReceiptHTML({
             <div class="info-label">Shipping Address</div>
             <div class="info-value">
               <div>${name || ""}</div>
-              ${recipient.deliveryAddress ? `<div style="margin-top:2px;">${recipient.deliveryAddress}</div>` : ""}
-              <div style="margin-top:2px;color:${MUTED};font-size:12px;">${recipient.email || ""}</div>
+              ${
+                recipient.deliveryAddress
+                  ? `<div style="margin-top:2px;">${recipient.deliveryAddress}</div>`
+                  : ""
+              }
+              <div style="margin-top:2px;color:${MUTED};font-size:12px;">${
+                recipient.email || ""
+              }</div>
             </div>
           </div>
         </div>

@@ -14,9 +14,16 @@
  *   - Naira equivalent is always shown muted under the converted courier fee
  *   - Delivery Fee in Order Summary uses the converted fee in the selected currency
  *   - Paystack is always charged in NGN using FX conversion of the total
+ *   - Paystack gateway fees are added on top of the order total and shown transparently
  */
 
-import React, { useState, useEffect, useMemo, useCallback } from "react";
+import React, {
+  useState,
+  useEffect,
+  useMemo,
+  useCallback,
+  useRef,
+} from "react";
 import dynamic from "next/dynamic";
 import { useRouter } from "next/navigation";
 import Link from "next/link";
@@ -130,10 +137,45 @@ function unitPriceFromProduct(product: any, currency: Currency): number {
   if (typeof val === "number") return val;
 
   const anyPrice =
-    product?.priceNGN ?? product?.priceUSD ?? product?.priceEUR ?? product?.priceGBP;
+    product?.priceNGN ??
+    product?.priceUSD ??
+    product?.priceEUR ??
+    product?.priceGBP;
   if (typeof anyPrice === "number") return anyPrice;
 
   return 0;
+}
+
+/**
+ * Compute Paystack gateway fee in NGN (major units) for a given NGN amount.
+ * - Local: 1.5% + ₦100 (₦100 waived for amounts < ₦2500), capped at ₦2000
+ * - International: 3.9% + ₦100, no cap
+ * Paystack fees already include VAT on their side.
+ */
+function computePaystackFeeInNaira(
+  amountNGN: number,
+  isLocal: boolean
+): number {
+  if (!Number.isFinite(amountNGN) || amountNGN <= 0) return 0;
+
+  if (isLocal) {
+    const percent = amountNGN * 0.015;
+    let fee = percent;
+
+    if (amountNGN >= 2500) {
+      fee += 100;
+    }
+
+    if (fee > 2000) {
+      fee = 2000;
+    }
+
+    return Math.round(fee);
+  }
+
+  // International card: 3.9% + ₦100, no cap
+  const fee = amountNGN * 0.039 + 100;
+  return Math.round(fee);
 }
 
 export default function CheckoutSection({ user }: Props) {
@@ -141,6 +183,22 @@ export default function CheckoutSection({ user }: Props) {
   const { data: session } = useSession({ required: false });
   const { currency } = useCurrency();
   const currencyCode = currency as Currency;
+
+  // ── NEW: Detect currency change while on checkout and hard-reload page ──
+  const initialCurrencyRef = useRef<Currency | null>(null);
+  useEffect(() => {
+    if (initialCurrencyRef.current === null) {
+      // first render, remember initial currency
+      initialCurrencyRef.current = currencyCode;
+      return;
+    }
+    if (initialCurrencyRef.current !== currencyCode) {
+      // currency changed while user is on checkout → reload to reset everything
+      if (typeof window !== "undefined") {
+        window.location.reload();
+      }
+    }
+  }, [currencyCode]);
 
   // FX state for delivery options + summary + Paystack
   const [fxTable, setFxTable] = useState<FxTable | null>(null);
@@ -287,6 +345,19 @@ export default function CheckoutSection({ user }: Props) {
     [phoneCode]
   );
 
+  // STRICT PHONE NORMALISATION:
+  // - keep only digits
+  // - strip leading zeros so local part is always like 8112345678
+  const handlePhoneInputChange = useCallback(
+    (raw: string) => {
+      let digits = raw.replace(/\D/g, "");
+      if (digits.startsWith("0")) {
+        digits = digits.replace(/^0+/, "");
+      }
+      setPhoneNumber(digits);
+    }, []
+  );
+
   // Derived full address
   const fullName = `${(firstName || "").trim()} ${(lastName || "").trim()}`.trim();
 
@@ -419,25 +490,69 @@ export default function CheckoutSection({ user }: Props) {
   const [selectedShipRate, setSelectedShipRate] =
     useState<SelectedShipRate | null>(null);
 
-  // Converted shipping fee used in summary + Paystack
+  // Converted shipping fee used in summary
   const shipFee = selectedShipRate?.fee ?? 0;
-  const total = baseTotal + shipFee;
 
-  // Total in Naira for Paystack charging
-  const totalInNaira = useMemo(() => {
-    if (currencyCode === "NGN") return total;
-    if (!fxTable) return total; // fallback; ideally FX is available
+  // Total before applying Paystack transaction charge (items + size mods + shipping)
+  const totalBeforeGateway = baseTotal + shipFee;
+
+  // Same total expressed in NGN for Paystack charging
+  const totalBeforeGatewayInNaira = useMemo(() => {
+    if (currencyCode === "NGN") return totalBeforeGateway;
+    if (!fxTable) return totalBeforeGateway; // fallback; ideally FX is available
     try {
       return fxConvert(
-        total,
+        totalBeforeGateway,
         currencyCode as FxCurrency,
         "NGN",
         fxTable
       );
     } catch {
-      return total;
+      return totalBeforeGateway;
     }
-  }, [total, currencyCode, fxTable]);
+  }, [totalBeforeGateway, currencyCode, fxTable]);
+
+  // Heuristic: treat Nigerian customers paying in NGN as "local" Paystack transactions
+  const isLikelyLocalPaystackTx =
+    (country?.iso2 || "").toUpperCase() === "NG" &&
+    currencyCode === "NGN";
+
+  // Paystack transaction fee in NGN, based on Paystack public pricing (includes VAT on their side)
+  const paystackFeeInNaira = useMemo(
+    () =>
+      computePaystackFeeInNaira(
+        totalBeforeGatewayInNaira,
+        isLikelyLocalPaystackTx
+      ),
+    [totalBeforeGatewayInNaira, isLikelyLocalPaystackTx]
+  );
+
+  // Same Paystack fee converted back into the shopper's display currency for transparency
+  const paystackFeeDisplay = useMemo(() => {
+    if (!paystackFeeInNaira) return 0;
+    if (currencyCode === "NGN") return paystackFeeInNaira;
+    if (!fxTable) return 0;
+    try {
+      return fxConvert(
+        paystackFeeInNaira,
+        "NGN",
+        currencyCode as FxCurrency,
+        fxTable
+      );
+    } catch {
+      return 0;
+    }
+  }, [paystackFeeInNaira, currencyCode, fxTable]);
+
+  // Final totals:
+  // - `total` is what we show in the selected currency (items + shipping + Paystack fee)
+  // - `totalInNaira` is what we actually charge via Paystack in NGN
+  const total = totalBeforeGateway + paystackFeeDisplay;
+
+  const totalInNaira = useMemo(
+    () => totalBeforeGatewayInNaira + (paystackFeeInNaira || 0),
+    [totalBeforeGatewayInNaira, paystackFeeInNaira]
+  );
 
   // Checkout hook
   const { isProcessing, error, result, createOrder, reset } = useCheckout();
@@ -527,7 +642,7 @@ export default function CheckoutSection({ user }: Props) {
       shipbubble: {
         requestToken: selectedShipRate.requestToken,
         serviceCode: selectedShipRate.serviceCode,
-        courierId: selectedShipRate.courierId,
+        courierId: selectedShipRate.courierId || null,
         // fee & currency being stored as the user-facing converted values
         fee: selectedShipRate.fee,
         currency: selectedShipRate.currency,
@@ -602,8 +717,8 @@ export default function CheckoutSection({ user }: Props) {
         timestamp: new Date().toISOString(),
         deliveryOptionId: undefined,
         paymentReference: refString,
-        totalInNaira, // <- NGN total used for Paystack charge
-        // backend accepts `shipping`
+        totalInNaira, // NGN total used for Paystack charge (items + shipping + gateway fee)
+        paystackFeeInNaira,
         shipping: buildShipbubbleShipping(),
       });
 
@@ -649,8 +764,8 @@ export default function CheckoutSection({ user }: Props) {
         timestamp: new Date().toISOString(),
         deliveryOptionId: undefined,
         paymentReference: lastPaymentReference,
-        totalInNaira, // <- NGN total used for Paystack charge
-        // backend accepts `shipping`
+        totalInNaira,
+        paystackFeeInNaira,
         shipping: buildShipbubbleShipping(),
       });
 
@@ -791,7 +906,7 @@ export default function CheckoutSection({ user }: Props) {
                         value={phoneNumber}
                         placeholder={phonePlaceholder}
                         onChange={(e) =>
-                          setPhoneNumber(e.currentTarget.value)
+                          handlePhoneInputChange(e.currentTarget.value)
                         }
                       />
                       {phoneError && (
@@ -802,7 +917,8 @@ export default function CheckoutSection({ user }: Props) {
                     </div>
                   </div>
                   <p className="mt-1 text-[11px] text-gray-500">
-                    Do not include your country code here. We already apply{" "}
+                    Do not include your country code or a digit here.
+                    We already apply{" "}
                     <span className="font-medium">{phoneCode}</span>.
                   </p>
                 </FormField>
@@ -1098,10 +1214,8 @@ export default function CheckoutSection({ user }: Props) {
                                     r.courierCode ||
                                     r.raw?.courier_id ||
                                     "",
-                                  // store converted fee + active currency
                                   fee: convertedFee,
                                   currency: currencyCode as any,
-                                  // keep original too for reference / audits
                                   originalFee,
                                   originalCurrency:
                                     originalCurrency as SelectedShipRate["originalCurrency"],
@@ -1151,7 +1265,6 @@ export default function CheckoutSection({ user }: Props) {
                         ((unitWeight * item.quantity) || 0).toFixed(3)
                       );
 
-                      // derive unit + fee in current currency
                       const unitBase =
                         unitPriceFromProduct(item.product as any, currencyCode) ||
                         item.price ||
@@ -1232,9 +1345,11 @@ export default function CheckoutSection({ user }: Props) {
                 </div>
                 <div className="flex justify-between">
                   <span>Delivery Fee:</span>
-                  <span>
-                    {formatAmount(shipFee, currencyCode)}
-                  </span>
+                  <span>{formatAmount(shipFee, currencyCode)}</span>
+                </div>
+                <div className="flex justify-between">
+                  <span>Transaction Fee:</span>
+                  <span>{formatAmount(paystackFeeDisplay, currencyCode)}</span>
                 </div>
                 <div className="flex justify-between">
                   <span>Total Weight:</span>
@@ -1273,7 +1388,8 @@ export default function CheckoutSection({ user }: Props) {
 
                     <p className="mt-1 text-center text-xs text-gray-500">
                       You’ll be charged approximately{" "}
-                      {formatAmount(totalInNaira, "NGN")} (₦) via Paystack.
+                      {formatAmount(totalInNaira, "NGN")} (₦) via Paystack,
+                      including transaction fees.
                     </p>
 
                     {orderCreatingFromReference &&

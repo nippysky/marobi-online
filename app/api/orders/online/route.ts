@@ -47,8 +47,14 @@ interface OnlineOrderPayload {
   /**
    * Total that was actually charged via Paystack in NGN (major units),
    * i.e. what the frontend shows as "≈ ₦X via Paystack".
+   * This includes the Paystack gateway fee.
    */
   totalInNaira?: number;
+  /**
+   * Paystack transaction fee (gateway charge) that was included in totalInNaira,
+   * in NGN (major units).
+   */
+  paystackFeeInNaira?: number;
   shipping?: {
     source?: "shipbubble" | string;
     shipbubble?: ShipbubbleShippingPayload;
@@ -78,6 +84,7 @@ export async function POST(req: NextRequest) {
       paymentReference,
       shipping,
       totalInNaira,
+      paystackFeeInNaira,
     } = payload;
 
     requestPaymentReference = paymentReference;
@@ -317,7 +324,7 @@ export async function POST(req: NextRequest) {
     /**
      * For amount verification:
      * - If frontend sent totalInNaira, we trust that as the NGN amount charged
-     *   and compare to Paystack's amount.
+     *   (items + delivery + Paystack gateway fee) and compare to Paystack's amount.
      * - Otherwise, fall back to old behaviour (orderTotal in selected currency).
      */
     let expectedLowest: number;
@@ -444,7 +451,26 @@ export async function POST(req: NextRequest) {
     const deliveryDetailsData: any = {
       aggregatedWeight: parseFloat(aggregatedWeight.toFixed(3)),
       deliveryOptionId: deliveryOptionId ?? null,
+      payment: {},
     };
+
+    if (
+      typeof totalInNaira === "number" &&
+      Number.isFinite(totalInNaira)
+    ) {
+      deliveryDetailsData.payment.totalInNaira = totalInNaira;
+    }
+
+    if (
+      typeof paystackFeeInNaira === "number" &&
+      Number.isFinite(paystackFeeInNaira)
+    ) {
+      deliveryDetailsData.payment.paystackFeeInNaira = paystackFeeInNaira;
+    }
+
+    if (Object.keys(deliveryDetailsData.payment).length === 0) {
+      delete deliveryDetailsData.payment;
+    }
 
     if (isShipbubbleFlow) {
       deliveryDetailsData.shipbubble = {

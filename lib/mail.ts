@@ -537,11 +537,14 @@ function computeBackoffSeconds(attempts: number) {
 }
 
 // Invoice / receipt — shipping@ with reply routed to info@
+// NOTE: `transactionFee` should be the Paystack / gateway transaction fee
+// *in the same currency* you display the receipt in (usually NGN).
 export async function sendReceiptEmailWithRetry({
   order,
   recipient,
   currency,
   deliveryFee,
+  transactionFee,
 }: {
   order: any;
   recipient: {
@@ -554,6 +557,7 @@ export async function sendReceiptEmailWithRetry({
   };
   currency: string;
   deliveryFee: number;
+  transactionFee?: number;
 }) {
   const e = (recipient.email || "").trim();
   if (!e || !extractAddress(e)) {
@@ -566,6 +570,7 @@ export async function sendReceiptEmailWithRetry({
     recipient,
     currency: (currency as any) || "NGN",
     deliveryFee,
+    transactionFee,
     assetBaseUrl: APP_BASE_URL,
   });
 
@@ -574,6 +579,7 @@ export async function sendReceiptEmailWithRetry({
     recipient,
     currency: (currency as any) || "NGN",
     deliveryFee,
+    transactionFee,
   });
 
   try {
