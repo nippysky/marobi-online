@@ -52,6 +52,31 @@ const flagEmoji = (iso2: string) =>
 const normalizeDial = (code: string | number) =>
   `+${String(code).replace(/\D/g, "")}`;
 
+/**
+ * Normalize the local-part phone input:
+ *  - keep only digits
+ *  - strip any leading 0s (so "0810..." becomes "810...")
+ *  - cap length to a sane maximum (15)
+ * This matches the behaviour on Checkout, so
+ *   +234 8100146106
+ * is stored as phoneCode="+234" and phoneNumber="8100146106".
+ */
+function normalizeLocalPhoneInput(raw: string): string {
+  let digits = raw.replace(/\D/g, "");
+
+  // Strip one or more leading 0's (user typing 0810..., 080..., etc.)
+  if (digits.startsWith("0")) {
+    digits = digits.replace(/^0+/, "");
+  }
+
+  // Hard cap to avoid ridiculous pastes
+  if (digits.length > 15) {
+    digits = digits.slice(0, 15);
+  }
+
+  return digits;
+}
+
 export default function RegisterClient() {
   const router = useRouter();
 
@@ -93,7 +118,9 @@ export default function RegisterClient() {
 
         // default to Nigeria if available
         const ng =
-          data.find((c) => c.name.toLowerCase() === "nigeria") ?? data[0] ?? null;
+          data.find((c) => c.name.toLowerCase() === "nigeria") ??
+          data[0] ??
+          null;
         setCountry(ng || null);
 
         // set default dial (normalize in case API includes '+')
@@ -125,7 +152,7 @@ export default function RegisterClient() {
           headers: { "Content-Type": "application/json" },
           body: JSON.stringify({
             countryIso2: country.iso2, // use ISO2 for precise mapping
-            country: country.name,     // optional, for logging/fallback
+            country: country.name, // optional, for logging/fallback
           }),
         });
         if (!res.ok) throw new Error();
@@ -205,6 +232,12 @@ export default function RegisterClient() {
     }
   };
 
+  // ── Phone change handler (no leading 0, digits only) ────────────────
+  const handlePhoneChange = (e: React.ChangeEvent<HTMLInputElement>) => {
+    const normalized = normalizeLocalPhoneInput(e.target.value);
+    setPhoneNumber(normalized);
+  };
+
   return (
     <>
       <Toaster position="top-right" />
@@ -249,7 +282,9 @@ export default function RegisterClient() {
               <Select
                 value={country?.name ?? undefined}
                 onValueChange={(val) =>
-                  setCountry(countryList.find((c) => c.name === val) ?? null)
+                  setCountry(
+                    countryList.find((c) => c.name === val) ?? null
+                  )
                 }
                 disabled={loading}
               >
@@ -323,17 +358,22 @@ export default function RegisterClient() {
                   ))}
                 </SelectContent>
               </Select>
-              <Input
-                id="phone"
-                type="tel"
-                placeholder="8012345678"
-                value={phoneNumber}
-                onChange={(e) =>
-                  setPhoneNumber(e.target.value.replace(/[^\d]/g, ""))
-                }
-                required
-                disabled={loading}
-              />
+              <div className="flex-1">
+                <Input
+                  id="phone"
+                  type="tel"
+                  placeholder="8112345678"
+                  value={phoneNumber}
+                  onChange={handlePhoneChange}
+                  required
+                  disabled={loading}
+                />
+                <p className="mt-1 text-[11px] text-gray-500">
+                  Do not include your country code or a leading digit here. We
+                  already apply{" "}
+                  <span className="font-medium">{phoneCode}</span>.
+                </p>
+              </div>
             </div>
           </FormField>
 

@@ -282,7 +282,7 @@ export function renderReceiptHTML({
         <div class="totals">
           <div class="totals-row"><span>Subtotal</span><span>${symbolSubtotal}</span></div>
           <div class="totals-row"><span>Shipping</span><span>${symbolShipping}</span></div>
-          <div class="totals-row"><span>Transaction Fee</span><span>${symbolTx}</span></div>
+          <div class="totals-row"><span>Paystack Transaction Fee</span><span>${symbolTx}</span></div>
           <div class="totals-row" style="margin-top:6px;"><span><strong>Total</strong></span><span class="total-amount">${symbolTotal}</span></div>
         </div>
 

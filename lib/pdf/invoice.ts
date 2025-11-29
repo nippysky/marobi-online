@@ -415,7 +415,7 @@ export async function generateInvoicePDF({
 
   row("Subtotal:", subtotal);
   row("Shipping:", shipping);
-  row("Transaction Fee:", gatewayFee);
+  row("Paystack Transaction Fee:", gatewayFee);
   row("Total:", total, true);
 
   doc

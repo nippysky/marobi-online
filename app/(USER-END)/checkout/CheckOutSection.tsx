@@ -1348,7 +1348,7 @@ export default function CheckoutSection({ user }: Props) {
                   <span>{formatAmount(shipFee, currencyCode)}</span>
                 </div>
                 <div className="flex justify-between">
-                  <span>Transaction Fee:</span>
+                  <span>Paystack Transaction Fee:</span>
                   <span>{formatAmount(paystackFeeDisplay, currencyCode)}</span>
                 </div>
                 <div className="flex justify-between">
