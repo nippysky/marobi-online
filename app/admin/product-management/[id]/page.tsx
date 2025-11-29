@@ -4,7 +4,6 @@ import { prisma } from "@/lib/db";
 import Link from "next/link";
 import { notFound } from "next/navigation";
 import ProductTabsClient from "./ProductTabsClient";
-import { Badge } from "@/components/ui/badge"; // optional if you want badges for status
 
 interface ProductBasics {
   id: string;
@@ -29,7 +28,9 @@ interface ProductBasics {
     id: string;
     color: string;
     size: string;
-    stock: number;
+    stock: number;      // remaining stock
+    sold: number;       // total sold (derived from orders)
+    total: number;      // total ever = sold + remaining
     weight: number | null;
     createdAt: Date;
   }[];
@@ -77,7 +78,30 @@ async function getProductBasics(id: string): Promise<ProductBasics | null> {
       },
     },
   });
+
   if (!row) return null;
+
+  // Derive "sold" per variant from OrderItem + Order.status
+  const sales = await prisma.orderItem.groupBy({
+    by: ["variantId"],
+    where: {
+      variant: { productId: id },
+      order: {
+        status: {
+          in: ["Processing", "Shipped", "Delivered"], // count only non-cancelled
+        },
+      },
+    },
+    _sum: {
+      quantity: true,
+    },
+  });
+
+  const soldMap = new Map<string, number>();
+  for (const s of sales) {
+    soldMap.set(s.variantId, s._sum.quantity ?? 0);
+  }
+
   return {
     id: row.id,
     name: row.name,
@@ -97,14 +121,21 @@ async function getProductBasics(id: string): Promise<ProductBasics | null> {
     status: row.status,
     sizeMods: row.sizeMods,
     videoUrl: row.videoUrl,
-    variants: row.variants.map((v) => ({
-      id: v.id,
-      color: v.color,
-      size: v.size,
-      stock: v.stock,
-      weight: v.weight,
-      createdAt: v.createdAt,
-    })),
+    variants: row.variants.map((v) => {
+      const sold = soldMap.get(v.id) ?? 0;
+      const remaining = v.stock;
+      const total = sold + remaining;
+      return {
+        id: v.id,
+        color: v.color,
+        size: v.size,
+        stock: remaining,
+        sold,
+        total,
+        weight: v.weight,
+        createdAt: v.createdAt,
+      };
+    }),
     wishlistCount: row.wishlistItems?.length ?? 0,
   };
 }
@@ -175,7 +206,10 @@ function HeaderSection({ product }: { product: ProductBasics }) {
               count={product.ratingCount}
             />
             <div className="inline-flex items-center gap-1 px-2 py-1 rounded bg-blue-50 text-blue-800 text-sm font-medium">
-              Wishlist: <span className="ml-1 font-semibold">{product.wishlistCount}</span>
+              Wishlist:{" "}
+              <span className="ml-1 font-semibold">
+                {product.wishlistCount}
+              </span>
             </div>
             {product.sizeMods && (
               <div className="inline-flex items-center gap-1 px-2 py-1 rounded bg-indigo-50 text-indigo-800 text-sm font-medium">
@@ -231,7 +265,9 @@ function Stars({ value, count }: { value: number; count: number }) {
       {Array.from({ length: 5 }).map((_, i) => (
         <svg
           key={i}
-          className={`h-4 w-4 ${i < filled ? "text-yellow-500" : "text-gray-300"}`}
+          className={`h-4 w-4 ${
+            i < filled ? "text-yellow-500" : "text-gray-300"
+          }`}
           fill="currentColor"
           viewBox="0 0 20 20"
         >

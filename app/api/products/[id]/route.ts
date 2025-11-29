@@ -20,7 +20,11 @@ function numOrNull(v: unknown): number | null {
 }
 function cleanStringArray(
   raw: unknown,
-  { dedupe = true, max = 50, maxLen = 500 }: { dedupe?: boolean; max?: number; maxLen?: number } = {}
+  {
+    dedupe = true,
+    max = 50,
+    maxLen = 500,
+  }: { dedupe?: boolean; max?: number; maxLen?: number } = {}
 ): string[] {
   if (!Array.isArray(raw)) return [];
   const out: string[] = [];
@@ -49,6 +53,37 @@ function cleanSizeStocks(raw: unknown): Record<string, string> {
     if (!label || !stockStr) continue;
     out[label] = stockStr;
   }
+  return out;
+}
+function cleanColorSizeStocks(
+  raw: unknown
+): Record<string, Record<string, string>> {
+  const out: Record<string, Record<string, string>> = {};
+  if (!raw || typeof raw !== "object") return out;
+
+  for (const [colorKey, inner] of Object.entries(
+    raw as Record<string, unknown>
+  )) {
+    if (typeof colorKey !== "string" || !inner || typeof inner !== "object")
+      continue;
+    const color = colorKey.trim();
+    if (!color) continue;
+
+    const innerMap: Record<string, string> = {};
+    for (const [sizeKey, val] of Object.entries(
+      inner as Record<string, unknown>
+    )) {
+      if (typeof sizeKey !== "string" || typeof val !== "string") continue;
+      const sLabel = sizeKey.trim();
+      const stockStr = val.trim();
+      if (!sLabel || !stockStr) continue;
+      innerMap[sLabel] = stockStr;
+    }
+    if (Object.keys(innerMap).length > 0) {
+      out[color] = innerMap;
+    }
+  }
+
   return out;
 }
 function safePositiveInt(
@@ -90,8 +125,10 @@ export async function PUT(
   }
 
   // basic validation
-  if (!body?.name || typeof body.name !== "string") return jsonError("Product name is required.");
-  if (!body?.category || typeof body.category !== "string") return jsonError("Category is required.");
+  if (!body?.name || typeof body.name !== "string")
+    return jsonError("Product name is required.");
+  if (!body?.category || typeof body.category !== "string")
+    return jsonError("Category is required.");
   if (!isProductStatus(body.status)) return jsonError("Invalid status.");
 
   const name = body.name.trim().slice(0, 200);
@@ -114,10 +151,7 @@ export async function PUT(
   const priceGBP = numOrNull(body.price?.GBP);
 
   const rawSizeStocks = cleanSizeStocks(body.sizeStocks);
-  const sizeLabels = Object.keys(rawSizeStocks);
-  if (body.status === "Published" && sizeLabels.length === 0) {
-    return jsonError("At least one size/stock entry is required to publish.");
-  }
+  const rawColorSizeStocks = cleanColorSizeStocks(body.colorSizeStocks);
 
   const weight = safePositiveFloat(body.weight); // default variant weight
   if (body.status === "Published" && weight == null) {
@@ -133,26 +167,71 @@ export async function PUT(
   if (!categoryExists.isActive) return jsonError("Category is not active.", 400);
 
   // build desired variants
-  const effectiveColors = colors.length ? colors : [""];
+  const trimmedColors = colors;
+  const hasColorMatrix =
+    trimmedColors.length > 0 && Object.keys(rawColorSizeStocks).length > 0;
+
   const desiredMap = new Map<
     string,
     { color: string; size: string; stock: number; weight?: number }
   >();
-  for (const size of sizeLabels) {
-    const stock = safePositiveInt(rawSizeStocks[size]);
-    if (stock == null) continue;
-    for (const color of effectiveColors) {
-      const entry: { color: string; size: string; stock: number; weight?: number } = {
-        color,
-        size: size.trim(),
-        stock,
-      };
-      if (weight != null) entry.weight = weight;
-      desiredMap.set(comboKey(color, size), entry);
+
+  if (hasColorMatrix) {
+    // New behaviour: per-color, per-size stock matrix
+    for (const color of trimmedColors) {
+      const perColor = rawColorSizeStocks[color] || {};
+      for (const [sizeRaw, stockRaw] of Object.entries(perColor)) {
+        const size = sizeRaw.trim();
+        if (!size) continue;
+        const stock = safePositiveInt(stockRaw);
+        if (stock == null) continue;
+
+        const entry: {
+          color: string;
+          size: string;
+          stock: number;
+          weight?: number;
+        } = {
+          color,
+          size,
+          stock,
+        };
+        if (weight != null) entry.weight = weight;
+        desiredMap.set(comboKey(color, size), entry);
+      }
+    }
+  } else {
+    // Backwards-compatible logic: one stock per size, replicated across colors
+    const sizeLabels = Object.keys(rawSizeStocks);
+    const effectiveColors = trimmedColors.length ? trimmedColors : [""];
+
+    for (const sizeRaw of sizeLabels) {
+      const size = sizeRaw.trim();
+      if (!size) continue;
+      const stock = safePositiveInt(rawSizeStocks[sizeRaw]);
+      if (stock == null) continue;
+
+      for (const color of effectiveColors) {
+        const entry: {
+          color: string;
+          size: string;
+          stock: number;
+          weight?: number;
+        } = {
+          color,
+          size,
+          stock,
+        };
+        if (weight != null) entry.weight = weight;
+        desiredMap.set(comboKey(color, size), entry);
+      }
     }
   }
+
   if (body.status === "Published" && desiredMap.size === 0) {
-    return jsonError("No valid variants supplied for publish.");
+    return jsonError(
+      "At least one valid size/color/stock entry is required to publish."
+    );
   }
 
   try {
@@ -169,7 +248,6 @@ export async function PUT(
         where: { id: productId },
         data: {
           name,
-          // we keep your scalar update style to match existing code paths
           categorySlug,
           description,
           images,
@@ -188,7 +266,9 @@ export async function PUT(
         where: { productId },
         select: { id: true, color: true, size: true },
       });
-      const existingMap = new Map(existing.map((v) => [comboKey(v.color, v.size), v]));
+      const existingMap = new Map(
+        existing.map((v) => [comboKey(v.color, v.size), v])
+      );
 
       // upsert/update desired
       for (const desired of desiredMap.values()) {
@@ -271,7 +351,6 @@ export async function DELETE(
 
   const { id: productId } = await context.params;
   try {
-    // if variants are referenced by OrderItem, this may fail with P2003 (FK)
     await prisma.variant.deleteMany({ where: { productId } });
     await prisma.product.delete({ where: { id: productId } });
     return NextResponse.json({ success: true });
@@ -281,7 +360,6 @@ export async function DELETE(
       return NextResponse.json({ error: "Product not found" }, { status: 404 });
     }
     if (err?.code === "P2003") {
-      // FK constraint violation (e.g., order items referencing variants)
       return NextResponse.json(
         {
           error:
@@ -290,6 +368,9 @@ export async function DELETE(
         { status: 409 }
       );
     }
-    return NextResponse.json({ error: "Could not delete product" }, { status: 500 });
+    return NextResponse.json(
+      { error: "Could not delete product" },
+      { status: 500 }
+    );
   }
 }

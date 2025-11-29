@@ -247,12 +247,18 @@ const ProductDetailHero: React.FC<Props> = ({ product, user, categoryName }) => 
   const requireCustom = enableSizeMod && customSizeEnabled;
 
   const selectionsValid =
+    !!selectedVariant && // 🔒 ensure we actually resolved a variant
     (!requireColor || !!selectedColor) &&
     (!requireSize || !!selectedSize) &&
     (!requireCustom || allCustomMeasurementsFilled) &&
     quantity >= 1;
 
   const validate = () => {
+    // 🔒 double-check: if no variant exists for this combo, block it
+    if (!selectedVariant) {
+      toast.error("This color/size combination is currently unavailable.");
+      return false as const;
+    }
     if (outOfStock) return toast.error("Out of stock"), false as const;
     if (requireColor && !selectedColor)
       return toast.error("Select a color"), false as const;

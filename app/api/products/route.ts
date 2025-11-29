@@ -22,11 +22,15 @@ const ProductPayload = z.object({
   status: z.enum(["Draft", "Published", "Archived"]),
   sizeMods: z.boolean(),
   colors: z.array(z.string()),
-  sizeStocks: z.record(z.string(), z.string()), // { "S": "10", "M": "5" }
-  customSizes: z.array(z.string()), // accepted for future use (ignored on write)
+  sizeStocks: z.record(z.string(), z.string()), // { "S": "10", "M": "5" } – used when NO colors or as fallback
+  customSizes: z.array(z.string()), // accepted for future use
   images: z.array(z.string()),
   videoUrl: z.string().url().optional().nullable(),
   weight: z.number().min(0.0001, "Weight must be > 0"),
+  // Optional: per-color, per-size stock matrix
+  colorSizeStocks: z
+    .record(z.string(), z.record(z.string(), z.string()))
+    .optional(),
 });
 
 /* ────────────────────────────────────────────────────────────
@@ -102,7 +106,10 @@ export async function GET(_req: NextRequest) {
     });
   } catch (err) {
     console.error("GET /api/products error:", err);
-    return NextResponse.json({ error: "Failed to load products" }, { status: 500 });
+    return NextResponse.json(
+      { error: "Failed to load products" },
+      { status: 500 }
+    );
   }
 }
 
@@ -131,14 +138,17 @@ export async function POST(request: NextRequest) {
       sizeMods,
       colors,
       sizeStocks,
-      // customSizes, // currently ignored
+      // customSizes, // accepted but not needed here
       images,
       videoUrl,
       weight,
+      colorSizeStocks,
     } = parsed.data;
 
+    const trimmedColors = colors.map((c) => c.trim()).filter(Boolean);
     const sizes = Object.keys(sizeStocks);
-    if (colors.length === 0 && sizes.length === 0) {
+
+    if (trimmedColors.length === 0 && sizes.length === 0) {
       return NextResponse.json(
         { error: "Provide at least one color or one size" },
         { status: 400 }
@@ -164,28 +174,59 @@ export async function POST(request: NextRequest) {
     }
 
     // Build variants array (single `weight` applied to all)
-    const variants: Array<{ color: string; size: string; stock: number; weight: number }> = [];
-    if (colors.length && sizes.length) {
-      for (const color of colors) {
-        for (const size of sizes) {
+    const variants: Array<{
+      color: string;
+      size: string;
+      stock: number;
+      weight: number;
+    }> = [];
+
+    const hasColorMatrix =
+      trimmedColors.length > 0 &&
+      colorSizeStocks &&
+      Object.keys(colorSizeStocks).length > 0;
+
+    if (hasColorMatrix) {
+      // New behaviour: per-color, per-size stock
+      for (const color of trimmedColors) {
+        const perColor = colorSizeStocks[color] || {};
+        for (const [size, rawStock] of Object.entries(perColor)) {
+          const stock = Number(rawStock);
+          if (!Number.isFinite(stock) || stock <= 0) continue;
           variants.push({
             color,
             size,
-            stock: Number(sizeStocks[size] ?? "0") || 0,
+            stock,
             weight,
           });
         }
       }
-    } else if (colors.length) {
-      for (const color of colors) {
+    } else if (trimmedColors.length && sizes.length) {
+      // Backwards-compatible: same stock per size for each color
+      for (const color of trimmedColors) {
+        for (const size of sizes) {
+          const stock = Number(sizeStocks[size] ?? "0") || 0;
+          variants.push({
+            color,
+            size,
+            stock,
+            weight,
+          });
+        }
+      }
+    } else if (trimmedColors.length) {
+      // Colors but no sizes: keep existing semantics (size = "")
+      for (const color of trimmedColors) {
         variants.push({ color, size: "", stock: 0, weight });
       }
     } else {
+      // No colors: single dimension by size only
       for (const size of sizes) {
+        const stock = Number(sizeStocks[size] ?? "0") || 0;
         variants.push({
           color: "",
           size,
-          stock: Number(sizeStocks[size] ?? "0") || 0,
+          stock,
           weight,
         });
       }
@@ -276,6 +317,9 @@ export async function POST(request: NextRequest) {
     return NextResponse.json(shaped, { status: 201 });
   } catch (err) {
     console.error("POST /api/products error:", err);
-    return NextResponse.json({ error: "Internal server error" }, { status: 500 });
+    return NextResponse.json(
+      { error: "Internal server error" },
+      { status: 500 }
+    );
   }
 }

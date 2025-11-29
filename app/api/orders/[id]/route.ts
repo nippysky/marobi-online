@@ -26,18 +26,77 @@ export async function PATCH(
   }
 
   try {
-    // Update order and include customer relation for notification
-    const updated = await prisma.order.update({
+    // 1) Load existing order with items so we can adjust stock
+    const existing = await prisma.order.findUnique({
       where: { id: orderId },
-      data: { status: status as OrderStatus },
       include: {
+        items: {
+          select: {
+            variantId: true,
+            quantity: true,
+          },
+        },
         customer: {
           select: { firstName: true, lastName: true, email: true },
         },
       },
     });
 
-    // Derive recipient (registered customer or guestInfo)
+    if (!existing) {
+      return NextResponse.json({ error: "Order not found" }, { status: 404 });
+    }
+
+    const currentStatus = existing.status;
+    const nextStatus = status as OrderStatus;
+
+    // If no change, don't touch stock
+    if (currentStatus === nextStatus) {
+      return NextResponse.json({ success: true, order: existing });
+    }
+
+    const goingToCancelled =
+      currentStatus !== OrderStatus.Cancelled &&
+      nextStatus === OrderStatus.Cancelled;
+
+    const leavingCancelled =
+      currentStatus === OrderStatus.Cancelled &&
+      nextStatus !== OrderStatus.Cancelled;
+
+    // 2) Transaction: adjust variant stock if crossing Cancelled boundary,
+    //    then update status
+    const updated = await prisma.$transaction(async (tx) => {
+      if (goingToCancelled || leavingCancelled) {
+        for (const item of existing.items) {
+          if (goingToCancelled) {
+            // Cancel → put stock back
+            await tx.variant.update({
+              where: { id: item.variantId },
+              data: { stock: { increment: item.quantity } },
+            });
+          } else if (leavingCancelled) {
+            // Un-cancel → take stock out again
+            await tx.variant.update({
+              where: { id: item.variantId },
+              data: { stock: { decrement: item.quantity } },
+            });
+          }
+        }
+      }
+
+      return tx.order.update({
+        where: { id: orderId },
+        data: { status: nextStatus },
+        include: {
+          customer: {
+            select: { firstName: true, lastName: true, email: true },
+          },
+          // NOTE: guestInfo is a scalar Json field, so we DON'T include it here;
+          // it is already part of the returned Order object.
+        },
+      });
+    });
+
+    // 3) Derive recipient (registered customer or guestInfo)
     let to: string | undefined;
     let name: string | undefined;
 
@@ -54,7 +113,7 @@ export async function PATCH(
       name = `${gi.firstName ?? ""} ${gi.lastName ?? ""}`.trim();
     }
 
-    // Best-effort status email (do not fail request if email fails)
+    // 4) Best-effort status email (do not fail request if email fails)
     if (to && name) {
       try {
         await sendStatusEmail({
@@ -64,13 +123,16 @@ export async function PATCH(
           status: status as AllowedStatus,
         });
       } catch (emailErr) {
-        console.warn(`⚠️ Failed to send status email for order ${orderId}:`, emailErr);
+        console.warn(
+          `⚠️ Failed to send status email for order ${orderId}:`,
+          emailErr
+        );
       }
     }
 
     return NextResponse.json({ success: true, order: updated });
   } catch (err: any) {
-    // Prisma not found error => 404
+    // Prisma not found error => 404 (extra safety)
     if (err?.code === "P2025") {
       return NextResponse.json({ error: "Order not found" }, { status: 404 });
     }

@@ -17,7 +17,7 @@ import { sendGenericEmail } from "@/lib/mail";
 type IncomingItem = {
   productId: string;
   color: string; // "N/A" allowed
-  size: string;  // "N/A" allowed
+  size: string; // "N/A" allowed
   quantity: number;
   hasSizeMod?: boolean;
   customSize?: {
@@ -29,11 +29,11 @@ type IncomingItem = {
 };
 
 type IncomingCustomer = {
-  id?: string;          // existing customer id (optional)
-  firstName?: string;   // required for guests
-  lastName?: string;    // required for guests
-  email?: string;       // required for guests
-  phone?: string;       // required for guests
+  id?: string; // existing customer id (optional)
+  firstName?: string; // required for guests
+  lastName?: string; // required for guests
+  email?: string; // required for guests
+  phone?: string; // required for guests
   address?: string;
   country?: string;
   state?: string;
@@ -63,7 +63,9 @@ function toPrismaJson(
     return value as Prisma.InputJsonValue;
   } catch {
     // last-resort stringify if something non-serializable sneaks in
-    return JSON.parse(JSON.stringify({ invalid: true, original: String(value) })) as Prisma.InputJsonValue;
+    return JSON.parse(
+      JSON.stringify({ invalid: true, original: String(value) })
+    ) as Prisma.InputJsonValue;
   }
 }
 
@@ -101,13 +103,22 @@ export async function POST(req: NextRequest) {
       return NextResponse.json({ error: "No items provided" }, { status: 400 });
     }
     if (!paymentMethod || typeof paymentMethod !== "string") {
-      return NextResponse.json({ error: "paymentMethod is required" }, { status: 400 });
+      return NextResponse.json(
+        { error: "paymentMethod is required" },
+        { status: 400 }
+      );
     }
     if (!staffId || typeof staffId !== "string") {
-      return NextResponse.json({ error: "staffId is required" }, { status: 400 });
+      return NextResponse.json(
+        { error: "staffId is required" },
+        { status: 400 }
+      );
     }
     if (!CURRENCIES.includes(currency as CurrencyCode)) {
-      return NextResponse.json({ error: "Invalid or missing currency" }, { status: 400 });
+      return NextResponse.json(
+        { error: "Invalid or missing currency" },
+        { status: 400 }
+      );
     }
     const currencyEnum = currency as CurrencyEnum;
 
@@ -135,12 +146,21 @@ export async function POST(req: NextRequest) {
       | undefined;
 
     if (customer?.id) {
-      const found = await prisma.customer.findUnique({ where: { id: customer.id } });
+      const found = await prisma.customer.findUnique({
+        where: { id: customer.id },
+      });
       if (!found) {
-        return NextResponse.json({ error: "Customer not found" }, { status: 404 });
+        return NextResponse.json(
+          { error: "Customer not found" },
+          { status: 404 }
+        );
       }
       customerId = found.id;
-      existingCustomer = { firstName: found.firstName, lastName: found.lastName, email: found.email };
+      existingCustomer = {
+        firstName: found.firstName,
+        lastName: found.lastName,
+        email: found.email,
+      };
     } else {
       if (
         !customer?.firstName ||
@@ -148,7 +168,10 @@ export async function POST(req: NextRequest) {
         !customer?.email ||
         !customer?.phone
       ) {
-        return NextResponse.json({ error: "Guest customer info incomplete" }, { status: 400 });
+        return NextResponse.json(
+          { error: "Guest customer info incomplete" },
+          { status: 400 }
+        );
       }
       guestInfo = {
         firstName: customer.firstName,
@@ -162,11 +185,18 @@ export async function POST(req: NextRequest) {
     }
 
     // ── Optional delivery option
-    let deliveryOptionRecord: { id: string; baseFee: number | null } | null = null;
+    let deliveryOptionRecord:
+      | { id: string; baseFee: number | null }
+      | null = null;
     if (deliveryOptionId) {
-      const opt = await prisma.deliveryOption.findUnique({ where: { id: deliveryOptionId } });
+      const opt = await prisma.deliveryOption.findUnique({
+        where: { id: deliveryOptionId },
+      });
       if (!opt || !opt.active) {
-        return NextResponse.json({ error: "Invalid or inactive delivery option" }, { status: 400 });
+        return NextResponse.json(
+          { error: "Invalid or inactive delivery option" },
+          { status: 400 }
+        );
       }
       deliveryOptionRecord = { id: opt.id, baseFee: opt.baseFee ?? null };
     }
@@ -210,18 +240,27 @@ export async function POST(req: NextRequest) {
 
         const variantMap = new Map<string, (typeof variants)[number]>();
         for (const v of variants) {
-          variantMap.set(keyOf(v.productId, v.color || "N/A", v.size || "N/A"), v);
+          variantMap.set(
+            keyOf(v.productId, v.color || "N/A", v.size || "N/A"),
+            v
+          );
         }
 
         let totalAmount = 0; // in selected currency
-        let totalNGN = 0;    // mirror in NGN
+        let totalNGN = 0; // mirror in NGN
         const itemsCreateData: any[] = [];
 
         for (const raw of items) {
           const vKey = keyOf(raw.productId, raw.color, raw.size);
           const variant = variantMap.get(vKey);
-          if (!variant) throw new Error(`Variant not found: ${raw.productId} ${raw.color}/${raw.size}`);
-          if (variant.stock < raw.quantity) throw new Error(`Insufficient stock for ${variant.product.name}`);
+          if (!variant)
+            throw new Error(
+              `Variant not found: ${raw.productId} ${raw.color}/${raw.size}`
+            );
+          if (variant.stock < raw.quantity)
+            throw new Error(
+              `Insufficient stock for ${variant.product.name}`
+            );
 
           // decrement stock
           await tx.variant.update({
@@ -232,17 +271,28 @@ export async function POST(req: NextRequest) {
           // unit price in selected currency
           let unitPrice = 0;
           switch (currencyEnum) {
-            case "USD": unitPrice = variant.product.priceUSD ?? 0; break;
-            case "EUR": unitPrice = variant.product.priceEUR ?? 0; break;
-            case "GBP": unitPrice = variant.product.priceGBP ?? 0; break;
+            case "USD":
+              unitPrice = variant.product.priceUSD ?? 0;
+              break;
+            case "EUR":
+              unitPrice = variant.product.priceEUR ?? 0;
+              break;
+            case "GBP":
+              unitPrice = variant.product.priceGBP ?? 0;
+              break;
             case "NGN":
-            default:    unitPrice = variant.product.priceNGN ?? 0; break;
+            default:
+              unitPrice = variant.product.priceNGN ?? 0;
+              break;
           }
 
           // size mod (5%) only if product allows and user requested
           let lineTotal = unitPrice * raw.quantity;
-          const applicableSizeMod = !!raw.hasSizeMod && !!variant.product.sizeMods;
-          const sizeModFee = applicableSizeMod ? +(unitPrice * raw.quantity * 0.05).toFixed(2) : 0;
+          const applicableSizeMod =
+            !!raw.hasSizeMod && !!variant.product.sizeMods;
+          const sizeModFee = applicableSizeMod
+            ? +(unitPrice * raw.quantity * 0.05).toFixed(2)
+            : 0;
           if (applicableSizeMod) lineTotal += sizeModFee;
 
           totalAmount += lineTotal;
@@ -252,7 +302,9 @@ export async function POST(req: NextRequest) {
           const orderItem: any = {
             variantId: variant.id,
             name: variant.product.name,
-            image: Array.isArray(variant.product.images) ? variant.product.images[0] ?? null : null,
+            image: Array.isArray(variant.product.images)
+              ? variant.product.images[0] ?? null
+              : null,
             category: variant.product.categorySlug,
             quantity: raw.quantity,
             currency: currencyEnum,
@@ -280,7 +332,9 @@ export async function POST(req: NextRequest) {
 
         // (defensive) ensure it matches the pattern
         if (!/^M-ORD-\d{3,}$/.test(orderId)) {
-          throw new Error(`Order ID formatting failed for serial ${nextSerial.id}`);
+          throw new Error(
+            `Order ID formatting failed for serial ${nextSerial.id}`
+          );
         }
 
         const createdOrder = await tx.order.create({
@@ -288,7 +342,7 @@ export async function POST(req: NextRequest) {
             id: orderId,
             status: OrderStatus.Processing,
             currency: currencyEnum,
-            totalAmount,                   // items only
+            totalAmount, // items only
             totalNGN: Math.round(totalNGN),
             paymentMethod,
             createdAt: timestamp ? new Date(timestamp) : new Date(),
@@ -304,11 +358,19 @@ export async function POST(req: NextRequest) {
                 deliveryFee: resolvedDeliveryFee,
               },
             },
-            ...(deliveryOptionRecord ? { deliveryOptionId: deliveryOptionRecord.id } : {}),
+            ...(deliveryOptionRecord
+              ? { deliveryOptionId: deliveryOptionRecord.id }
+              : {}),
             deliveryFee: resolvedDeliveryFee,
-            ...(deliveryDetailsInput !== undefined ? { deliveryDetails: deliveryDetailsInput } : {}),
+            ...(deliveryDetailsInput !== undefined
+              ? { deliveryDetails: deliveryDetailsInput }
+              : {}),
           },
-          include: { items: true, customer: true },
+          include: {
+            items: true,
+            customer: true,
+            deliveryOption: true, // <-- include for email summary
+          },
         });
 
         await tx.offlineSale.create({
@@ -325,7 +387,8 @@ export async function POST(req: NextRequest) {
     );
 
     // ── Best-effort receipt email (updates ReceiptEmailStatus if present)
-    let to: string | undefined, name: string | undefined;
+    let to: string | undefined,
+      name: string | undefined;
     if (existingCustomer) {
       to = existingCustomer.email;
       name = `${existingCustomer.firstName} ${existingCustomer.lastName}`;
@@ -346,9 +409,92 @@ export async function POST(req: NextRequest) {
         const deliveryCharge = order.deliveryFee ?? 0;
         const grandTotal = +(subtotal + vat + deliveryCharge).toFixed(2);
         const sym =
-          order.currency === "NGN" ? "₦" :
-          order.currency === "USD" ? "$"  :
-          order.currency === "EUR" ? "€"  : "£";
+          order.currency === "NGN"
+            ? "₦"
+            : order.currency === "USD"
+            ? "$"
+            : order.currency === "EUR"
+            ? "€"
+            : "£";
+
+        // ── Delivery summary for email (method + details)
+        let deliveryMethodLabel = "Not specified";
+        let deliveryDetailsText = "";
+
+        // From relation (normal courier option)
+        if (order.deliveryOption) {
+          deliveryMethodLabel = order.deliveryOption.name;
+          if (order.deliveryOption.provider) {
+            deliveryMethodLabel += ` (${order.deliveryOption.provider})`;
+          }
+        }
+
+        // From JSON deliveryDetails (pickup or Shipbubble)
+        const rawDetails = order.deliveryDetails as any;
+
+        if (typeof rawDetails === "string" && rawDetails) {
+          // Pickup notes were stored as "PICKUP: ..." or "PICKUP"
+          if (rawDetails.toUpperCase().startsWith("PICKUP")) {
+            if (!order.deliveryOption) {
+              deliveryMethodLabel = "In-person pickup";
+            }
+            deliveryDetailsText = rawDetails;
+          } else {
+            deliveryDetailsText = rawDetails;
+          }
+        } else if (rawDetails && typeof rawDetails === "object") {
+          // Shipbubble format from offline form:
+          // { source: "Shipbubble", requestToken, rate: { courierName, serviceCode, fee, eta }, note }
+          if (rawDetails.source === "Shipbubble") {
+            const rate = rawDetails.rate || {};
+            const note = rawDetails.note;
+            if (!order.deliveryOption) {
+              deliveryMethodLabel = "Shipbubble Delivery";
+            }
+
+            const courierName = rate.courierName || "Courier";
+            const serviceCode = rate.serviceCode ? ` (${rate.serviceCode})` : "";
+            const eta = rate.eta ? ` • ETA: ${rate.eta}` : "";
+            const feePart =
+              typeof rate.fee === "number"
+                ? ` • Quoted fee: ${sym}${Number(rate.fee).toLocaleString()}`
+                : "";
+
+            deliveryDetailsText = `${courierName}${serviceCode}${eta}${feePart}`;
+            if (note) {
+              deliveryDetailsText += ` • Note: ${note}`;
+            }
+          } else {
+            // Fallback for any unexpected object shape
+            try {
+              deliveryDetailsText = JSON.stringify(rawDetails);
+            } catch {
+              deliveryDetailsText = "";
+            }
+          }
+        }
+
+        const deliveryBlockHtml =
+          deliveryMethodLabel === "Not specified" &&
+          deliveryCharge === 0 &&
+          !deliveryDetailsText
+            ? ""
+            : `
+            <h3 style="margin-top:24px;margin-bottom:8px">Delivery</h3>
+            <p style="margin:4px 0">
+              Method:
+              <strong> ${deliveryMethodLabel}</strong>
+            </p>
+            <p style="margin:4px 0">
+              Delivery fee:
+              <strong> ${sym}${deliveryCharge.toLocaleString()}</strong>
+            </p>
+            ${
+              deliveryDetailsText
+                ? `<p style="margin:4px 0">Details: ${deliveryDetailsText}</p>`
+                : ""
+            }
+          `;
 
         const bodyHtml = `
           <div style="font-family:Arial,sans-serif;line-height:1.5;color:#333">
@@ -370,7 +516,13 @@ export async function POST(req: NextRequest) {
                     ${p.name} × ${p.quantity}<br/>
                     <small>
                       Color: ${p.color} &bull; Size: ${p.size}
-                      ${p.hasSizeMod ? `&bull; Custom Size (5%): ${sym}${Number(p.sizeModFee).toFixed(2)}` : ""}
+                      ${
+                        p.hasSizeMod
+                          ? `&bull; Custom Size (5%): ${sym}${Number(
+                              p.sizeModFee
+                            ).toFixed(2)}`
+                          : ""
+                      }
                     </small>
                   </td>
                   <td align="right" style="font-family:monospace">
@@ -380,6 +532,8 @@ export async function POST(req: NextRequest) {
                 )
                 .join("")}
             </table>
+
+            ${deliveryBlockHtml}
 
             <div style="margin-top:24px;font-family:monospace">
               <p style="margin:6px 0">Subtotal: <strong>${sym}${subtotal.toLocaleString()}</strong></p>
@@ -402,7 +556,9 @@ export async function POST(req: NextRequest) {
           bodyHtml,
           button: {
             label: "View Your Orders",
-            url: `${process.env.NEXTAUTH_URL ?? "http://localhost:3000"}/account`,
+            url: `${
+              process.env.NEXTAUTH_URL ?? "http://localhost:3000"
+            }/account`,
           },
           preheader: `Your order ${order.id} is being processed.`,
           footerNote: "If you have any questions, just reply to this email.",
@@ -426,7 +582,10 @@ export async function POST(req: NextRequest) {
         });
         if (receiptStatus) {
           const attempts = receiptStatus.attempts;
-          const delayMs = Math.min(24 * 60 * 60 * 1000, 60 * 60 * 1000 * Math.pow(2, attempts));
+          const delayMs = Math.min(
+            24 * 60 * 60 * 1000,
+            60 * 60 * 1000 * Math.pow(2, attempts)
+          );
           const nextRetryAt = new Date(Date.now() + delayMs);
           await prisma.receiptEmailStatus.update({
             where: { orderId: order.id },
@@ -441,11 +600,15 @@ export async function POST(req: NextRequest) {
       }
     }
 
-    return NextResponse.json({ success: true, orderId: order.id }, { status: 201 });
+    return NextResponse.json(
+      { success: true, orderId: order.id },
+      { status: 201 }
+    );
   } catch (err: any) {
     console.error("Offline-sale POST error:", err);
     const msg =
-      typeof err?.message === "string" && err.message.startsWith("Insufficient")
+      typeof err?.message === "string" &&
+      err.message.startsWith("Insufficient")
         ? err.message
         : "Internal Server Error";
     const status = msg === "Internal Server Error" ? 500 : 400;

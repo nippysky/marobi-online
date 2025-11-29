@@ -49,7 +49,7 @@ const HeroSlider: React.FC<HeroSliderProps> = ({ slides, intervalMs = 7000 }) =>
       <div
         className={`
           relative w-full
-          h-[18rem] sm:h-[22rem] md:h-[26rem] lg:h-[30rem] xl:h-[34rem]
+          h-[22rem] sm:h-[24rem] md:h-[28rem] lg:h-[32rem] xl:h-[40rem]
           overflow-hidden
         `}
         onMouseEnter={() => setPaused(true)}

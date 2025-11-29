@@ -27,7 +27,9 @@ interface ProductBasics {
     id: string;
     color: string;
     size: string;
-    stock: number;
+    stock: number;      // remaining
+    sold: number;       // total sold
+    total: number;      // total ever = sold + remaining
     weight: number | null;
     createdAt: Date;
   }[];
@@ -177,7 +179,9 @@ function OverviewSection({ product }: { product: ProductBasics }) {
                   <tr>
                     <th className="text-left p-2 border-b">Color</th>
                     <th className="text-left p-2 border-b">Size</th>
-                    <th className="text-left p-2 border-b">Stock</th>
+                    <th className="text-left p-2 border-b">Total Stock</th>
+                    <th className="text-left p-2 border-b">Sold</th>
+                    <th className="text-left p-2 border-b">Remaining</th>
                     <th className="text-left p-2 border-b">Weight</th>
                     <th className="text-left p-2 border-b">Created</th>
                   </tr>
@@ -185,8 +189,10 @@ function OverviewSection({ product }: { product: ProductBasics }) {
                 <tbody>
                   {product.variants.map((v) => (
                     <tr key={v.id} className="odd:bg-gray-50">
-                      <td className="p-2 border-b">{v.color}</td>
-                      <td className="p-2 border-b">{v.size}</td>
+                      <td className="p-2 border-b">{v.color || "—"}</td>
+                      <td className="p-2 border-b">{v.size || "—"}</td>
+                      <td className="p-2 border-b">{v.total}</td>
+                      <td className="p-2 border-b">{v.sold}</td>
                       <td className="p-2 border-b">{v.stock}</td>
                       <td className="p-2 border-b">
                         {v.weight != null ? `${v.weight.toFixed(2)} kg` : "—"}
