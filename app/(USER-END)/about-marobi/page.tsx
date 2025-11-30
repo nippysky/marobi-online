@@ -61,7 +61,7 @@ export default function AboutMarobi() {
           <div className="mt-12 flex flex-wrap items-center justify-center gap-4 md:gap-6">
             {/* Facebook */}
             <Link
-              href="#"
+              href="https://www.facebook.com/share/1a1g2RduqH/?mibextid=wwXIfr"
               aria-label="Visit Marobi on Facebook"
               className="flex h-16 w-16 items-center justify-center rounded-2xl border border-gray-200 bg-white shadow-sm transition hover:-translate-y-0.5 hover:shadow-md"
             >
@@ -97,7 +97,7 @@ export default function AboutMarobi() {
 
             {/* WhatsApp */}
             <Link
-              href="#"
+              href="https://wa.me/2347025003685"
               aria-label="Chat with Marobi on WhatsApp"
               className="flex h-16 w-16 items-center justify-center rounded-2xl border border-gray-200 bg-white shadow-sm transition hover:-translate-y-0.5 hover:shadow-md"
             >

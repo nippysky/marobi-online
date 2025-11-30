@@ -128,7 +128,7 @@ const HeroSlider: React.FC<HeroSliderProps> = ({ slides, intervalMs = 7000 }) =>
                     <p
                       className={[
                         "mt-3 md:mt-4",
-                        "text-[0.95rem] sm:text-base md:text-lg",
+                        "text-[1.2rem] uppercase tracking-wide sm:text-base md:text-lg font-semibold",
                         "text-white/90 drop-shadow",
                         "max-w-prose",
                       ].join(" ")}
@@ -144,8 +144,8 @@ const HeroSlider: React.FC<HeroSliderProps> = ({ slides, intervalMs = 7000 }) =>
                         className={[
                           "inline-flex items-center justify-center",
                           "rounded-full px-6 py-2.5 md:px-7 md:py-3",
-                          "font-semibold",
-                          "bg-brand text-white",
+                          "font-medium",
+                          "bg-brand text-white text-[0.85rem]",
                           "shadow-[0_8px_20px_-8px_rgba(0,0,0,0.45)]",
                           "ring-1 ring-white/20",
                           "transition-all duration-200",

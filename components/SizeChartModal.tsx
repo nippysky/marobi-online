@@ -98,18 +98,20 @@ export const SizeChartModal: React.FC = () => {
           {/* Backdrop */}
           <motion.div
             key="sc-backdrop"
-            className="fixed inset-0 z-40 bg-black/50"
+            className="fixed inset-0 bg-black/50"
             variants={backdrop}
             initial="hidden"
             animate="visible"
             exit="hidden"
+            style={{zIndex: 10000000}}
             transition={{ duration: 0.2 }}
             onClick={handleClose}
           />
 
           {/* Wrapper centers dialog on desktop, anchors sheet on mobile */}
-          <div className="fixed inset-0 z-50 flex items-end md:items-center md:justify-center">
+          <div className="fixed inset-0 flex items-end md:items-center md:justify-center" style={{zIndex: 10000001}}>
             <motion.div
+            style={{zIndex: 10000001}}
               key="sc-panel"
               role="dialog"
               aria-modal="true"

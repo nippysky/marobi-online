@@ -22,10 +22,10 @@ export default function Footer() {
     comingSoon?: boolean;
   }> = [
     { name: "Instagram", href: "https://instagram.com/marobi_rtw", Icon: FaInstagram, label: "@marobi_rtw" },
-    { name: "TikTok", href: "https://www.tiktok.com/@marobi.rtw", Icon: FaTiktok, label: "@marobi.rtw" },
+    { name: "TikTok", href: "https://www.tiktok.com/@marobi_rtw", Icon: FaTiktok, label: "@marobi_rtw" },
     { name: "X", href: "https://x.com/marobi_rtw", Icon: FaXTwitter, label: "@marobi_rtw" },
-    { name: "Facebook", href: "#", Icon: FaFacebookF, label: "Facebook", comingSoon: true },
-    { name: "WhatsApp", href: "#", Icon: FaWhatsapp, label: "WhatsApp", comingSoon: true },
+    { name: "Facebook", href: "https://www.facebook.com/share/1a1g2RduqH/?mibextid=wwXIfr", Icon: FaFacebookF, label: "Marobi Online" },
+    { name: "WhatsApp", href: "https://wa.me/2347025003685", Icon: FaWhatsapp, label: "WhatsApp" },
   ];
 
   return (
@@ -44,8 +44,7 @@ export default function Footer() {
           </Link>
 
           <p className="text-sm leading-6 text-white/85 max-w-2xl">
-            Our pieces are designed to help women step into every room with
-            confidence, elegance, and quiet wealth.
+          Your Look, Your Power.
           </p>
         </div>
 
