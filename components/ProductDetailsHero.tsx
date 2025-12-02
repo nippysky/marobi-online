@@ -511,6 +511,24 @@ const ProductDetailHero: React.FC<Props> = ({ product, user, categoryName }) => 
             {hasSize && (
               <div className="flex-1">
                 <label className="block text-sm text-gray-700 mb-1">Size</label>
+
+                {/* Size chart reminder */}
+                <div className="mb-2 rounded-lg border border-amber-200 bg-amber-50 px-3 py-2 text-xs md:text-[13px] text-amber-800 flex gap-2">
+                  <CheckCircle className="h-4 w-4 mt-[2px]" />
+                  <span>
+                    <span className="font-semibold">Size tip:</span>{" "}
+                    Please check the{" "}
+                    <button
+                      type="button"
+                      onClick={openSizeChart}
+                      className="underline font-semibold"
+                    >
+                      Size Chart
+                    </button>{" "}
+                    to confirm your measurements before selecting your size.
+                  </span>
+                </div>
+
                 <Select
                   value={selectedSize || undefined}
                   onValueChange={setSelectedSize}
