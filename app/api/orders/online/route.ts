@@ -338,7 +338,9 @@ export async function POST(req: NextRequest) {
       expectedLowest = toLowest(orderTotal);
     }
 
-    if (paystackTx.amount !== expectedLowest) {
+    // The user must not underpay.
+    // If the user paid LESS than expected, stop and store orphan.
+    if (paystackTx.amount < expectedLowest) {
       try {
         await prisma.orphanPayment.upsert({
           where: { reference: paymentReference },
@@ -348,15 +350,13 @@ export async function POST(req: NextRequest) {
             currency: paystackTx.currency,
             payload: paystackTx as any,
             reconciled: false,
-            resolutionNote:
-              "Amount mismatch between expected order total and captured payment",
+            resolutionNote: `Underpayment: expected ${expectedLowest}, got ${paystackTx.amount}`,
           },
           update: {
             payload: paystackTx as any,
             amount: paystackTx.amount,
             currency: paystackTx.currency,
-            resolutionNote:
-              "Updated: amount mismatch between expected and captured payment",
+            resolutionNote: `Updated: underpayment: expected ${expectedLowest}, got ${paystackTx.amount}`,
           },
         });
       } catch {
@@ -365,11 +365,38 @@ export async function POST(req: NextRequest) {
 
       return NextResponse.json(
         {
-          error: `Payment amount mismatch: expected ${expectedLowest}, got ${paystackTx.amount}`,
+          error: `Payment underpaid: expected ${expectedLowest}, got ${paystackTx.amount}`,
         },
         { status: 400 }
       );
     }
+
+    // If user paid MORE than expected, allow order creation,
+    // but log this mismatch for admin/reconciliation.
+    if (paystackTx.amount > expectedLowest) {
+      try {
+        await prisma.orphanPayment.upsert({
+          where: { reference: paymentReference },
+          create: {
+            reference: paymentReference,
+            amount: paystackTx.amount,
+            currency: paystackTx.currency,
+            payload: paystackTx as any,
+            reconciled: false,
+            resolutionNote: `Overpayment: expected ${expectedLowest}, got ${paystackTx.amount}`,
+          },
+          update: {
+            payload: paystackTx as any,
+            amount: paystackTx.amount,
+            currency: paystackTx.currency,
+            resolutionNote: `Updated: overpayment: expected ${expectedLowest}, got ${paystackTx.amount}`,
+          },
+        });
+      } catch {
+        // swallow
+      }
+    }
+    // If equal → no orphan entry, just continue normally.
 
     const session = await getServerSession(authOptions);
     let customerId: string | null = null;

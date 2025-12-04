@@ -14,6 +14,7 @@ import {
   NotebookPen,
   User,
   Rows4,
+  Recycle,
 } from "lucide-react";
 import { BsBag } from "react-icons/bs";
 import { RiAdminLine } from "react-icons/ri";
@@ -27,6 +28,7 @@ const navItems = [
   { name: "Products Management", href: "/admin/product-management", icon: <Boxes size={20} /> },
   { name: "Order Inventory",     href: "/admin/order-inventory",   icon: <BsBag size={20} /> },
   { name: "Customers",           href: "/admin/customers",         icon: <Users size={20} /> },
+  { name: "Reconciliation",      href: "/admin/reconciliation",   icon: <Recycle size={20} /> },
   { name: "Staff & Admin",       href: "/admin/staff-admins",      icon: <RiAdminLine size={20} /> },
   { name: "Store Settings",      href: "/admin/settings",          icon: <Settings size={20} /> },
 ];

@@ -26,6 +26,8 @@ interface Recipient {
   email: string;
   deliveryAddress?: string | null;
   billingAddress?: string | null;
+  /** Optional phone number; used on packing slip. */
+  phone?: string | null;
 }
 
 interface RenderReceiptArgs {
@@ -331,5 +333,360 @@ export function renderReceiptHTML({
     </div>
   </div>
 </body>
+</html>`;
+}
+
+/* ──────────────────────────────────────────────────────────────
+   Packing slip renderer (for couriers / riders)
+   - No billing address
+   - No monetary values
+   - Customer + shipping info first, then items
+   ────────────────────────────────────────────────────────────── */
+
+/** Tiny HTML escape helper for packing slip. */
+function escapeHtml(v: any): string {
+  return String(v ?? "")
+    .replace(/&/g, "&amp;")
+    .replace(/</g, "&lt;")
+    .replace(/>/g, "&gt;")
+    .replace(/"/g, "&quot;")
+    .replace(/'/g, "&#39;");
+}
+
+/**
+ * Packing slip HTML used ONLY for printing.
+ * Use this from the admin print icon instead of renderReceiptHTML.
+ */
+export function renderPackingSlipHTML({
+  order,
+  recipient,
+  currency, // kept for signature compatibility, unused
+  deliveryFee, // unused
+  assetBaseUrl,
+  shipping,
+  transactionFee, // unused
+}: RenderReceiptArgs): string {
+  const fullName = `${recipient.firstName || ""} ${
+    recipient.lastName || ""
+  }`.trim();
+
+  const items = Array.isArray(order.items) ? order.items : [];
+
+  const itemsRows = items
+    .map((item: any, idx: number) => {
+      const name = escapeHtml(item?.name ?? "Item");
+      const qty = item?.quantity ?? 1;
+      const color = item?.color ? escapeHtml(item.color) : "";
+      const size = item?.size ? escapeHtml(item.size) : "";
+      const hasSizeMod = !!item?.hasSizeMod;
+      const customSize =
+        item?.customSize && typeof item.customSize === "object"
+          ? Object.entries(item.customSize as Record<string, string>)
+              .map(([k, v]) => `${escapeHtml(k)}: ${escapeHtml(v)}`)
+              .join(", ")
+          : "";
+
+      const variant =
+        [color && `Color: ${color}`, size && `Size: ${size}`]
+          .filter(Boolean)
+          .join(" • ") || "";
+
+      const sizeModText = hasSizeMod
+        ? customSize
+          ? `Custom sizing (${customSize})`
+          : "Custom sizing applied"
+        : "";
+
+      return `
+        <tr>
+          <td>${idx + 1}</td>
+          <td>
+            <div class="item-name">${name}</div>
+            ${
+              variant
+                ? `<div class="item-meta">${escapeHtml(variant)}</div>`
+                : ""
+            }
+            ${
+              sizeModText
+                ? `<div class="item-pill">Size Mod: ${escapeHtml(
+                    sizeModText
+                  )}</div>`
+                : ""
+            }
+          </td>
+          <td class="qty-col">${qty}</td>
+        </tr>
+      `;
+    })
+    .join("");
+
+  const createdAt = order.createdAt ? safeDate(order.createdAt) : "";
+  const orderId = order.id ?? "";
+
+  const courierName =
+    (shipping?.courierName && String(shipping.courierName).trim()) ||
+    getCourierNameFromOrder(order) ||
+    "";
+  const shippingSummary = shipping?.summary
+    ? escapeHtml(shipping.summary)
+    : "";
+
+  const logoSrc = assetBaseUrl
+    ? `${assetBaseUrl}/Marobi_Logo.png`
+    : "/Marobi_Logo.png";
+
+  const phoneStr = recipient.phone ? escapeHtml(recipient.phone) : "";
+
+  return `<!doctype html>
+<html>
+  <head>
+    <meta charset="utf-8" />
+    <title>Packing Slip ${escapeHtml(orderId)}</title>
+    <style>
+      * { box-sizing: border-box; }
+      body {
+        margin: 0;
+        padding: 24px;
+        background: ${BG};
+        font-family: system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI",
+          sans-serif;
+        color: #111827;
+      }
+      .sheet {
+        max-width: 720px;
+        margin: 0 auto;
+        background: #ffffff;
+        border-radius: 12px;
+        border: 1px solid ${BORDER};
+        box-shadow: 0 18px 35px rgba(15, 23, 42, 0.08);
+        padding: 24px 28px 28px;
+      }
+      .header {
+        display: flex;
+        justify-content: space-between;
+        gap: 16px;
+        margin-bottom: 18px;
+      }
+      .brand-block {
+        display: flex;
+        flex-direction: column;
+        gap: 4px;
+      }
+      .brand-logo {
+        height: 32px;
+        width: auto;
+        display: block;
+      }
+      .brand-sub {
+        font-size: 11px;
+        text-transform: uppercase;
+        letter-spacing: 0.12em;
+        color: #9ca3af;
+      }
+      .meta {
+        text-align: right;
+        font-size: 11px;
+        color: #6b7280;
+      }
+      .meta strong {
+        color: #111827;
+      }
+      .section-title {
+        font-size: 11px;
+        font-weight: 600;
+        text-transform: uppercase;
+        letter-spacing: 0.12em;
+        color: #6b7280;
+        margin-bottom: 4px;
+      }
+      .section-card {
+        border-radius: 10px;
+        border: 1px solid ${BORDER};
+        padding: 12px 14px;
+        margin-bottom: 12px;
+        background: #f9fafb;
+      }
+      .section-grid {
+        display: flex;
+        flex-wrap: wrap;
+        gap: 12px;
+      }
+      .section-grid > div {
+        flex: 1 1 220px;
+      }
+      .label {
+        font-size: 10px;
+        text-transform: uppercase;
+        letter-spacing: 0.14em;
+        color: #9ca3af;
+        margin-bottom: 2px;
+      }
+      .value {
+        font-size: 13px;
+        font-weight: 500;
+        color: #111827;
+      }
+      .muted {
+        font-size: 12px;
+        color: #6b7280;
+      }
+      .items-wrapper {
+        margin-top: 10px;
+      }
+      table.items-table {
+        width: 100%;
+        border-collapse: collapse;
+        border-radius: 10px;
+        overflow: hidden;
+      }
+      .items-table th,
+      .items-table td {
+        padding: 8px 10px;
+        font-size: 12px;
+        text-align: left;
+        vertical-align: top;
+        border-bottom: 1px solid ${BORDER};
+      }
+      .items-table th {
+        background: #f3f4ff;
+        font-size: 11px;
+        text-transform: uppercase;
+        letter-spacing: 0.12em;
+        color: #4b5563;
+      }
+      .items-table tr:last-child td {
+        border-bottom: none;
+      }
+      .items-table td:first-child,
+      .items-table th:first-child {
+        width: 40px;
+        text-align: center;
+      }
+      .items-table td.qty-col,
+      .items-table th.qty-col {
+        width: 60px;
+        text-align: center;
+      }
+      .item-name {
+        font-weight: 500;
+        color: #111827;
+      }
+      .item-meta {
+        font-size: 11px;
+        color: #6b7280;
+        margin-top: 2px;
+      }
+      .item-pill {
+        display: inline-block;
+        margin-top: 4px;
+        padding: 2px 8px;
+        border-radius: 999px;
+        background: #eef2ff;
+        color: #4338ca;
+        font-size: 11px;
+        font-weight: 500;
+      }
+      .footer {
+        margin-top: 18px;
+        font-size: 11px;
+        color: #9ca3af;
+        text-align: center;
+      }
+      @media print {
+        body {
+          background: #ffffff;
+          padding: 0;
+        }
+        .sheet {
+          max-width: 100%;
+          margin: 0;
+          border-radius: 0;
+          box-shadow: none;
+        }
+      }
+    </style>
+  </head>
+  <body>
+    <div class="sheet">
+      <div class="header">
+        <div class="brand-block">
+          <img src="${logoSrc}" alt="${BRAND_NAME} logo" class="brand-logo" />
+          <div class="brand-sub">Packing Slip</div>
+        </div>
+        <div class="meta">
+          <div><strong>Order:</strong> ${escapeHtml(orderId)}</div>
+          ${createdAt ? `<div><strong>Date:</strong> ${escapeHtml(createdAt)}</div>` : ""}
+          ${order.paymentMethod ? `<div><strong>Payment:</strong> ${escapeHtml(order.paymentMethod)}</div>` : ""}
+        </div>
+      </div>
+
+      <div class="section-title">Customer & Shipping</div>
+      <div class="section-card section-grid">
+        <div>
+          <div class="label">Recipient</div>
+          <div class="value">${
+            fullName ? escapeHtml(fullName) : "Customer"
+          }</div>
+          ${
+            recipient.email
+              ? `<div class="muted">${escapeHtml(recipient.email)}</div>`
+              : ""
+          }
+          ${
+            phoneStr
+              ? `<div class="muted">Phone: ${phoneStr}</div>`
+              : ""
+          }
+        </div>
+        <div>
+          <div class="label">Shipping Address</div>
+          <div class="value">${
+            recipient.deliveryAddress
+              ? escapeHtml(recipient.deliveryAddress)
+              : "Not provided"
+          }</div>
+        </div>
+        ${
+          courierName || shippingSummary
+            ? `<div>
+                 <div class="label">Courier</div>
+                 <div class="value">${
+                   courierName ? escapeHtml(courierName) : "—"
+                 }</div>
+                 ${
+                   shippingSummary
+                     ? `<div class="muted">${shippingSummary}</div>`
+                     : ""
+                 }
+               </div>`
+            : ""
+        }
+      </div>
+
+      <div class="section-title" style="margin-top:14px;">Items</div>
+      <div class="section-card items-wrapper" style="background:#ffffff;">
+        <table class="items-table">
+          <thead>
+            <tr>
+              <th>#</th>
+              <th>Product</th>
+              <th class="qty-col">Qty</th>
+            </tr>
+          </thead>
+          <tbody>
+            ${
+              itemsRows ||
+              `<tr><td colspan="3" style="text-align:center;padding:18px 10px;font-size:12px;color:#6b7280;">No items recorded.</td></tr>`
+            }
+          </tbody>
+        </table>
+      </div>
+
+      <div class="footer">
+        This document is for fulfillment only. No monetary values are printed for package security.
+      </div>
+    </div>
+  </body>
 </html>`;
 }
