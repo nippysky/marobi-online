@@ -111,7 +111,7 @@ async function detectCurrency(req: NextRequest): Promise<{
 
 /* ---------------- Middleware ---------------- */
 
-export async function middleware(req: NextRequest) {
+export async function proxy(req: NextRequest) {
   const url = req.nextUrl.clone();
   const path = normalize(url.pathname);
   const callback = encodeURIComponent(url.pathname + url.search);
