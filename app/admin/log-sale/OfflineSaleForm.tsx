@@ -1,4 +1,3 @@
-
 "use client";
 
 
@@ -135,6 +134,7 @@ interface CustomerSearchResult {
    ──────────────────────────────────────────────────────────────── */
 type ShipbubbleRate = {
   id: string;
+  courierId: string | null; // ✅ ADD
   courierName: string;
   serviceCode: string;
   fee: number;
@@ -144,7 +144,9 @@ type ShipbubbleRate = {
 };
 
 type ShipbubbleRateApiItem = {
-  courierCode: string | null;
+  courierCode?: string | number | null; // your current API seems to return this
+  courierId?: string | number | null;   // ✅ allow
+  courier_id?: string | number | null;  // ✅ allow
   courierName: string;
   serviceCode: string;
   fee: number;
@@ -152,6 +154,7 @@ type ShipbubbleRateApiItem = {
   eta?: string | null;
   raw?: unknown;
 };
+
 
 /* ────────────────────────────────────────────────────────────────
    Helpers
@@ -581,7 +584,13 @@ export default function OfflineSaleForm({ staffId }: Props) {
           )
       : true;
 
-  const canSubmit = step === 3 && canNext && !!deliveryOption && (!isShipbubbleSelected || !!selectedSbRate);
+const canSubmit =
+  step === 3 &&
+  canNext &&
+  !!deliveryOption &&
+  (!isShipbubbleSelected ||
+    (!!selectedSbRate?.serviceCode && !!selectedSbRate?.courierId && !!sbRequestToken));
+
 
   const addRow = () =>
     setItems((s) => [
@@ -910,15 +919,40 @@ export default function OfflineSaleForm({ staffId }: Props) {
 
       const rawRates: ShipbubbleRateApiItem[] = Array.isArray(json?.rates) ? json.rates : [];
 
-      const mapped: ShipbubbleRate[] = rawRates.map((r, idx) => ({
-        id: `${r.courierCode || r.courierName || "c"}-${r.serviceCode}-${idx}`,
-        courierName: r.courierName,
-        serviceCode: r.serviceCode,
-        fee: Number(r.fee) || 0,
-        currency: (r.currency || "NGN") as ShipbubbleRate["currency"],
-        eta: r.eta ?? null,
-        raw: r.raw ?? r,
-      }));
+ const mapped: ShipbubbleRate[] = rawRates.map((r: any, idx) => {
+  const courierIdRaw =
+    r?.courierId ??
+    r?.courier_id ??
+    r?.courierCode ??
+    r?.courier_code ??
+    r?.raw?.courier_id ??
+    r?.raw?.courierId ??
+    r?.raw?.courierCode ??
+    null;
+
+  const courierId = courierIdRaw != null ? String(courierIdRaw) : null;
+
+  const courierName =
+    String(r?.courierName ?? r?.courier_name ?? r?.raw?.courier_name ?? "").trim();
+
+  const serviceCode =
+    String(r?.serviceCode ?? r?.service_code ?? r?.raw?.service_code ?? "").trim();
+
+  const fee = Number(r?.fee ?? r?.total ?? r?.raw?.total ?? 0) || 0;
+
+  return {
+    id: `${courierId || courierName || "c"}-${serviceCode || "svc"}-${idx}`,
+    courierId,
+    courierName,
+    serviceCode,
+    fee,
+    currency: (r?.currency || "NGN") as ShipbubbleRate["currency"],
+    eta: r?.eta ?? r?.delivery_eta ?? r?.pickup_eta ?? null,
+    raw: r?.raw ?? r,
+  };
+});
+
+
 
       setSbRates(mapped);
       setSbRequestToken(json?.requestToken || json?.request_token || null);
@@ -944,6 +978,16 @@ export default function OfflineSaleForm({ staffId }: Props) {
   useEffect(() => {
     if (selectedSbRate && isShipbubbleSelected) setDeliveryFee(selectedSbRate.fee || 0);
   }, [selectedSbRate, isShipbubbleSelected]);
+
+  // reset Shipbubble state when user switches away from Shipbubble delivery
+useEffect(() => {
+  if (!isShipbubbleSelected) {
+    setSelectedSbRate(null);
+    setSbRates([]);
+    setSbRequestToken(null);
+    setSbError(null);
+  }
+}, [isShipbubbleSelected]);
 
   /* ────────────────────────────────────────────────────────────────
      Submit
@@ -984,18 +1028,30 @@ export default function OfflineSaleForm({ staffId }: Props) {
         timestamp: new Date().toISOString(),
         deliveryOptionId: isPickup || isShipbubbleSelected ? undefined : deliveryOption?.id,
         deliveryFee: isPickup ? 0 : deliveryFee,
-        deliveryDetails: isPickup
-          ? deliveryDetails
-            ? `PICKUP: ${deliveryDetails}`
-            : "PICKUP"
-          : isShipbubbleSelected
-          ? {
-              source: "Shipbubble",
-              requestToken: sbRequestToken,
-              rate: selectedSbRate,
-              note: deliveryDetails || null,
-            }
-          : deliveryDetails || undefined,
+    deliveryDetails: isPickup
+  ? deliveryDetails
+    ? `PICKUP: ${deliveryDetails}`
+    : "PICKUP"
+  : isShipbubbleSelected
+  ? {
+      source: "Shipbubble",
+
+      // ✅ canonical fields (label creation will use these)
+      requestToken: sbRequestToken,
+      serviceCode: selectedSbRate?.serviceCode ?? null,
+      courierId: selectedSbRate?.courierId ?? null,
+      courierName: selectedSbRate?.courierName ?? null,
+
+      // optional helpful extras
+      amount: selectedSbRate?.fee ?? null,
+      currency: "NGN",
+
+      // keep full rate payload for debugging/auditing
+      rate: selectedSbRate,
+      note: deliveryDetails || null,
+    }
+  : deliveryDetails || undefined,
+
       };
 
       const res = await fetch("/api/offline-sales", {

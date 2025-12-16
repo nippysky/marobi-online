@@ -23,8 +23,6 @@ function isoDatePlus(days: number) {
 const CATEGORY_ID = Number(process.env.SHIPBUBBLE_CATEGORY_ID || "90097994");
 const DEFAULT_INSTRUCTIONS = "Handle with care";
 
-const mask = (s?: string | null) =>
-  s ? `${String(s).slice(0, 12)}…` : "(none)";
 const includesCI = (hay?: string, needle?: string) =>
   (hay || "").toLowerCase().includes((needle || "").toLowerCase());
 
@@ -33,24 +31,15 @@ function normalizeCountryForAddress(country: string | undefined | null) {
   const raw = (country || "").trim();
   if (!raw) return "";
   const upper = raw.toUpperCase();
-
-  // ISO-2 code detection
   if (/^[A-Z]{2}$/.test(upper)) {
     if (upper === "NG") return "Nigeria";
-    // For other ISO codes we just return the code; Shipbubble usually wants full names,
-    // but we don't have a full world map baked in.
     return raw;
   }
-
   return raw;
 }
 
 /** Avoid "Lagos, Lagos" in `"city, state"` when they are the same. */
-function pushCityState(
-  parts: string[],
-  city?: string | null,
-  state?: string | null
-) {
+function pushCityState(parts: string[], city?: string | null, state?: string | null) {
   const c = (city || "").trim();
   const s = (state || "").trim();
   if (c && s && c.toLowerCase() !== s.toLowerCase()) {
@@ -64,11 +53,7 @@ function pushCityState(
 
 // Client’s courier policy (by human names)
 const LAGOS_NAMES = ["Stallion King", "Dellyman", "Fez Delivery"];
-const NIGERIA_OUTSIDE_LAGOS_NAMES = [
-  "Fez Delivery",
-  "Red star",
-  "GIG Logistics",
-];
+const NIGERIA_OUTSIDE_LAGOS_NAMES = ["Fez Delivery", "Red star", "GIG Logistics"];
 
 /* ───────────────────────────── ORIGIN: dynamic resolver ───────────────────────────── */
 
@@ -97,7 +82,6 @@ function buildOriginSingleLine(): string {
   return parts.join(", ");
 }
 
-/** Basic sanity check so we don’t hit the validator with empty inputs. */
 function originEnvIsSane(): boolean {
   return (
     ORIGIN_ENV.name.trim() !== "" &&
@@ -113,7 +97,6 @@ function originEnvIsSane(): boolean {
 /**
  * Resolve ORIGIN on every request via /shipping/address/validate
  * - No memory cache
- * - No SHIPBUBBLE_ORIGIN_SINGLE_LINE fallback
  * - Throws if validation fails or address_code is missing
  */
 async function getOriginAddressCode(): Promise<number> {
@@ -131,10 +114,8 @@ async function getOriginAddressCode(): Promise<number> {
     address: originAddress,
   };
 
-
   const validated = await validateAddressExact(originBody);
   const code = Number(validated?.address_code || 0);
-
 
   if (!code || Number.isNaN(code)) {
     throw new Error(
@@ -154,11 +135,7 @@ type DestinationPayload = AddressValidateBody & {
 };
 
 /**
- * Build the exact address string Shipbubble likes, from the raw destination
- * fields coming from the client.
- *
- * Example output:
- *   "63 Birnin Kebbi Crescent, Garki 2, Abuja Federal Capital Territory, Nigeria"
+ * Build the exact address string Shipbubble likes.
  */
 function buildDestinationSingleLine(dest: DestinationPayload): string {
   const parts: string[] = [];
@@ -180,45 +157,22 @@ export async function POST(req: Request) {
   try {
     const body = await req.json();
 
-    // Expected input:
-    // {
-    //   destination: { name, email, phone, address, city?, state?, country? },
-    //   total_weight_kg: number,
-    //   total_value: number,
-    //   items?: [{ name, description?, unitWeightKG, unitAmount, quantity }],
-    //   pickup_days_from_now?: number
-    // }
-
     const destRaw = body?.destination as DestinationPayload;
     const totalWeight = Number(body?.total_weight_kg || 0);
     const totalValue = Number(body?.total_value || 0);
-    const pickupDays = Math.min(
-      Math.max(Number(body?.pickup_days_from_now ?? 1), 0),
-      7
-    );
+    const pickupDays = Math.min(Math.max(Number(body?.pickup_days_from_now ?? 1), 0), 7);
 
-    if (
-      !destRaw?.address ||
-      !destRaw?.name ||
-      !destRaw?.email ||
-      !destRaw?.phone
-    ) {
+    if (!destRaw?.address || !destRaw?.name || !destRaw?.email || !destRaw?.phone) {
       return NextResponse.json(
-        {
-          error:
-            "destination { name, email, phone, address } are required for rates lookup",
-        },
+        { error: "destination { name, email, phone, address } are required for rates lookup" },
         { status: 400 }
       );
     }
     if (!totalWeight || totalWeight <= 0) {
-      return NextResponse.json(
-        { error: "total_weight_kg must be > 0" },
-        { status: 400 }
-      );
+      return NextResponse.json({ error: "total_weight_kg must be > 0" }, { status: 400 });
     }
 
-    // Build the single-line address we will actually validate with Shipbubble
+    // Build the single-line address we validate with Shipbubble
     const destAddress = buildDestinationSingleLine(destRaw);
     const destForValidate: AddressValidateBody = {
       name: destRaw.name,
@@ -227,7 +181,6 @@ export async function POST(req: Request) {
       address: destAddress,
     };
 
-
     // 1) Resolve ORIGIN dynamically (source of truth).
     const originCode = await getOriginAddressCode();
 
@@ -235,18 +188,12 @@ export async function POST(req: Request) {
     const validated = await validateAddressExact(destForValidate);
     const receiverCode = validated.address_code;
 
-
-    const countryCode = (
-      validated.country_code ||
-      validated.country ||
-      ""
-    ).toUpperCase();
+    const countryCode = (validated.country_code || validated.country || "").toUpperCase();
     const stateName = (validated.state || validated.state_code || "").toString();
     const cityName = (validated.city || validated.city_code || "").toString();
     const isNigeria = countryCode === "NG";
     const isLagos =
-      isNigeria &&
-      (includesCI(stateName, "Lagos") || includesCI(cityName, "Lagos"));
+      isNigeria && (includesCI(stateName, "Lagos") || includesCI(cityName, "Lagos"));
 
     // 3) Boxes
     const boxes = await fetchBoxes().catch(() => [] as any[]);
@@ -255,12 +202,12 @@ export async function POST(req: Request) {
     // 4) package_items
     const itemsFromClient = Array.isArray(body?.items) ? body.items : [];
     let package_items: PackageItem[];
+
     if (itemsFromClient.length) {
       package_items = itemsFromClient.map((it: any) => ({
         name: String(it?.name ?? "Item"),
         description: String(it?.description ?? "Cart item"),
-        unit_weight:
-          Number(it?.unitWeightKG ?? it?.unit_weight ?? 0.5) || 0.5,
+        unit_weight: Number(it?.unitWeightKG ?? it?.unit_weight ?? 0.5) || 0.5,
         unit_amount: Number(it?.unitAmount ?? it?.unit_amount ?? 0),
         quantity: Number(it?.quantity ?? 1) || 1,
       }));
@@ -296,10 +243,7 @@ export async function POST(req: Request) {
 
     // 5) Filter couriers based on destination policy
     let raw;
-    let appliedFilter: "lagos" | "nigeria-other" | "all" = "all";
-
     if (isNigeria && isLagos) {
-      appliedFilter = "lagos";
       const integrations = await fetchCourierIntegrations();
       const selectedCodes = integrations
         .filter((c) => LAGOS_NAMES.some((n) => includesCI(c.name, n)))
@@ -311,12 +255,9 @@ export async function POST(req: Request) {
           ? await fetchRatesForSelected(selectedCodes.join(","), fetchBody)
           : await fetchRatesExact(fetchBody);
     } else if (isNigeria) {
-      appliedFilter = "nigeria-other";
       const integrations = await fetchCourierIntegrations();
       const selectedCodes = integrations
-        .filter((c) =>
-          NIGERIA_OUTSIDE_LAGOS_NAMES.some((n) => includesCI(c.name, n))
-        )
+        .filter((c) => NIGERIA_OUTSIDE_LAGOS_NAMES.some((n) => includesCI(c.name, n)))
         .map((c) => c.service_code)
         .filter(Boolean);
 
@@ -325,31 +266,32 @@ export async function POST(req: Request) {
           ? await fetchRatesForSelected(selectedCodes.join(","), fetchBody)
           : await fetchRatesExact(fetchBody);
     } else {
-      appliedFilter = "all";
       raw = await fetchRatesExact(fetchBody);
     }
 
-    const token = raw?.request_token || null;
+    const requestToken = raw?.request_token ? String(raw.request_token) : null;
 
+    // ✅ Canonical rates response shape (client & server agree forever)
     const rates =
-      (raw?.couriers || []).map((c) => ({
-        courierName: c.courier_name,
-        courierCode: c.courier_id,
-        courierId: c.courier_id,
-        serviceCode: c.service_code,
-        fee: Number(c.total || 0),
-        currency: c.currency || "NGN",
-        eta: c.delivery_eta || c.pickup_eta || "",
-        raw: c,
-        request_token: token,
-        requestToken: token,
-      })) ?? [];
+      (raw?.couriers || []).map((c: any) => {
+        const courierId = c?.courier_id != null ? String(c.courier_id) : null;
+        return {
+          courierId,                 // ✅ canonical
+          courierCode: courierId,    // ✅ kept for backward compatibility
+          courierName: String(c?.courier_name || ""),
+          serviceCode: String(c?.service_code || ""),
+          fee: Number(c?.total || 0),
+          currency: String(c?.currency || "NGN"),
+          eta: String(c?.delivery_eta || c?.pickup_eta || ""),
+          raw: c,
+        };
+      }) ?? [];
 
     return NextResponse.json(
       {
         rates,
-        request_token: token,
-        requestToken: token,
+        requestToken,        // ✅ canonical
+        request_token: requestToken, // ✅ kept for backward compatibility
         box_used: chosen
           ? {
               name: chosen.name,
@@ -369,12 +311,10 @@ export async function POST(req: Request) {
       shipbubble: err?.shipbubble,
       stack: err?.stack,
     });
+
     return NextResponse.json(
       {
-        error:
-          err?.shipbubble?.message ||
-          err?.message ||
-          "Shipbubble rates failed",
+        error: err?.shipbubble?.message || err?.message || "Shipbubble rates failed",
         details: err?.shipbubble?.errors || undefined,
       },
       { status: 502 }

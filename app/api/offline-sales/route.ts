@@ -123,13 +123,23 @@ function normalizeShipbubbleDeliveryDetails(dd: unknown): unknown {
     o?.raw?.service_code ??
     null;
 
-  const courierId =
-    o?.shipbubble?.courierId ??
-    o?.rate?.courierId ??
-    o?.courierId ??
-    o?.courier_id ??
-    o?.raw?.courier_id ??
-    null;
+const courierId =
+  o?.shipbubble?.courierId ??
+  o?.shipbubble?.courier_id ??
+  o?.shipbubble?.courierCode ??       // ✅ ADD
+  o?.shipbubble?.courier_code ??      // ✅ ADD
+  o?.rate?.courierId ??
+  o?.rate?.courier_id ??
+  o?.rate?.courierCode ??             // ✅ ADD
+  o?.rate?.courier_code ??            // ✅ ADD
+  o?.courierId ??
+  o?.courier_id ??
+  o?.courierCode ??                   // ✅ ADD
+  o?.courier_code ??                  // ✅ ADD
+  o?.raw?.courier_id ??
+  o?.raw?.courierId ??
+  o?.raw?.courierCode ??              // ✅ ADD
+  null;
 
   const courierName =
     o?.shipbubble?.courierName ??
