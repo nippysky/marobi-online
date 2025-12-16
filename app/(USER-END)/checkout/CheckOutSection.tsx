@@ -579,7 +579,6 @@ export default function CheckoutSection({ user }: Props) {
         `${Date.now()}-${Math.random().toString(36).slice(2, 6)}`
       );
     }
-    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [total, email]);
 
   // ❗ Paystack must receive NGN in kobo

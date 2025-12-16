@@ -69,6 +69,7 @@ function tryParseJSON<T = any>(s: unknown): T | null {
     return null;
   }
 }
+
 function numToKgString(v: unknown): string | null {
   if (v === undefined || v === null) return null;
   const s = String(v).trim();
@@ -76,6 +77,7 @@ function numToKgString(v: unknown): string | null {
   if (!isFinite(n)) return null;
   return /kg/i.test(s) ? s : `${n}kg`;
 }
+
 function extractWeightFromAny(obj: any): string | null {
   if (!obj || typeof obj !== "object") return null;
   return (
@@ -92,6 +94,7 @@ function extractWeightFromAny(obj: any): string | null {
     ) ?? null
   );
 }
+
 function extractEtaFromAny(obj: any): string | null {
   if (!obj || typeof obj !== "object") return null;
   const eta =
@@ -103,6 +106,7 @@ function extractEtaFromAny(obj: any): string | null {
     obj?.eta;
   return eta ? String(eta) : null;
 }
+
 function extractCourierFromAny(obj: any): string | null {
   if (!obj || typeof obj !== "object") return null;
   const sb = obj.shipbubble ?? obj;
@@ -117,11 +121,14 @@ function extractCourierFromAny(obj: any): string | null {
   if (typeof direct === "string" && direct.trim()) return direct.trim();
   return null;
 }
+
 function humanizeOnClient(maybeJsonOrText: string | null | undefined): string {
   if (!maybeJsonOrText) return "—";
   if (maybeJsonOrText.includes("•")) return maybeJsonOrText;
+
   const trimmed = maybeJsonOrText.trim();
   if (!trimmed.startsWith("{") && trimmed.length <= 64) return trimmed;
+
   const obj = tryParseJSON<any>(maybeJsonOrText);
   if (obj) {
     const courier = extractCourierFromAny(obj) ?? "—";
@@ -132,19 +139,24 @@ function humanizeOnClient(maybeJsonOrText: string | null | undefined): string {
     if (eta) parts.push(`ETA: ${eta}`);
     return parts.join(" • ");
   }
+
   return trimmed.length <= 64 ? trimmed : "—";
 }
+
 function stripLeadingName(humanized: string, name: string | undefined): string {
   if (!humanized || !name) return humanized;
   const parts = humanized
     .split("•")
     .map((p) => p.trim())
     .filter(Boolean);
+
   if (!parts.length) return humanized;
+
   const norm = (s: string) => s.toLowerCase().replace(/\s+/g, " ").trim();
   if (norm(parts[0]) === norm(name)) parts.shift();
   return parts.join(" • ");
 }
+
 function DisplayDeliveryDetails({
   details,
   omitName,
@@ -154,12 +166,15 @@ function DisplayDeliveryDetails({
 }) {
   let human = humanizeOnClient(details);
   if (omitName) human = stripLeadingName(human, omitName);
+
   if (!human || human === "—") return <span>—</span>;
+
   if (human.includes("•")) {
     const parts = human
       .split("•")
       .map((e) => e.trim())
       .filter(Boolean);
+
     return (
       <div className="space-y-1">
         {parts.map((entry, idx) => {
@@ -176,7 +191,36 @@ function DisplayDeliveryDetails({
       </div>
     );
   }
+
   return <span>{human}</span>;
+}
+
+/** Detect offline "In-person pickup" so we can hide Shipbubble label buttons */
+function isInPersonPickupOrder(order: OrderRow): boolean {
+  // 1) deliveryDetails string cases from your offline-sales route ("PICKUP" / "PICKUP: ...")
+  const dd = (order as any).deliveryDetails as string | null | undefined;
+  if (typeof dd === "string") {
+    const t = dd.trim().toLowerCase();
+    if (t.startsWith("pickup")) return true;
+    if (t.includes("in-person pickup")) return true;
+    if (t.includes("walk-in")) return true;
+  }
+
+  // 2) delivery option name includes pickup
+  const optName = order.deliveryOption?.name?.toLowerCase?.() ?? "";
+  if (optName.includes("pickup")) return true;
+
+  // 3) If deliveryDetails is JSON string/object and contains pickup-ish fields
+  const obj = tryParseJSON<any>(dd);
+  if (obj && typeof obj === "object") {
+    const source = String(obj?.source ?? "").toLowerCase();
+    const method = String(obj?.method ?? obj?.type ?? "").toLowerCase();
+    const note = String(obj?.note ?? "").toLowerCase();
+    if (source.includes("pickup") || method.includes("pickup") || note.includes("pickup"))
+      return true;
+  }
+
+  return false;
 }
 
 /* ========================= component ========================= */
@@ -222,7 +266,7 @@ export default function OrderTable({
 
   function toRenderPayload(o: OrderRow) {
     const courierName = o.deliveryOption?.name || undefined;
-    const human = humanizeOnClient(o.deliveryDetails);
+    const human = humanizeOnClient((o as any).deliveryDetails);
     const summary = stripLeadingName(human, courierName);
     return {
       order: {
@@ -246,7 +290,7 @@ export default function OrderTable({
         firstName: o.customer?.name?.split(" ")[0] ?? "Customer",
         lastName: o.customer?.name?.split(" ").slice(1).join(" ") ?? "",
         email: o.customer?.email ?? "",
-        phone: o.customer?.phone ?? "",              // ✅ phone wired through
+        phone: o.customer?.phone ?? "",
         deliveryAddress: o.customer?.address ?? "",
         billingAddress: o.customer?.address ?? "",
       },
@@ -283,21 +327,22 @@ export default function OrderTable({
 
   async function handlePrint(order: OrderRow) {
     const { default: printJS } = await import("print-js");
-    // Use the new packing slip template for printing
     const html = renderPackingSlipHTML(toRenderPayload(order));
     printJS({ printable: html, type: "raw-html", scanStyles: false });
   }
 
   async function refreshHasLabel(id: string) {
     try {
-      const res = await fetch(
-        `/api/admin/orders/${id}/shipbubble/status`,
-        { method: "GET", cache: "no-store" }
-      );
+      const res = await fetch(`/api/admin/orders/${id}/shipbubble/status`, {
+        method: "GET",
+        cache: "no-store",
+      });
       if (!res.ok) return;
       const j = await res.json();
       setData((d) =>
-        d.map((o) => (o.id === id ? { ...o, hasShipbubbleLabel: !!j.hasLabel } : o))
+        d.map((o) =>
+          o.id === id ? { ...o, hasShipbubbleLabel: !!j.hasLabel } : o
+        )
       );
     } catch {
       /* ignore */
@@ -333,9 +378,7 @@ export default function OrderTable({
       toast.success("Shipment label created");
       await refreshHasLabel(order.id);
     } catch (err: any) {
-      toast.error(
-        "❌ " + (err?.message || "Unable to create shipment label.")
-      );
+      toast.error("❌ " + (err?.message || "Unable to create shipment label."));
     } finally {
       setLabelBusyIds((s) => {
         const copy = new Set(s);
@@ -372,9 +415,7 @@ export default function OrderTable({
       toast.success("Shipment label cancelled");
       await refreshHasLabel(order.id);
     } catch (err: any) {
-      toast.error(
-        "❌ " + (err?.message || "Unable to cancel shipment label.")
-      );
+      toast.error("❌ " + (err?.message || "Unable to cancel shipment label."));
     } finally {
       setLabelBusyIds((s) => {
         const copy = new Set(s);
@@ -397,7 +438,11 @@ export default function OrderTable({
       }
       if (showSearch && statusFilter !== "All" && o.status !== statusFilter)
         return false;
-      if (showSearch && currencyFilter !== "All" && o.currency !== currencyFilter)
+      if (
+        showSearch &&
+        currencyFilter !== "All" &&
+        o.currency !== currencyFilter
+      )
         return false;
       return true;
     });
@@ -415,9 +460,7 @@ export default function OrderTable({
     }
     tick();
     const t = setInterval(tick, 20000);
-    return () => {
-      clearInterval(t);
-    };
+    return () => clearInterval(t);
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [filtered.map((o) => o.id).join("|")]);
 
@@ -443,7 +486,7 @@ export default function OrderTable({
         .join(" | ");
       const courierName = o.deliveryOption?.name || "";
       const human = stripLeadingName(
-        humanizeOnClient(o.deliveryDetails),
+        humanizeOnClient((o as any).deliveryDetails),
         courierName
       );
       return {
@@ -467,10 +510,9 @@ export default function OrderTable({
         "Created At": o.createdAt,
       };
     });
+
     const csv = Papa.unparse(rows);
-    const blob = new Blob([csv], {
-      type: "text/csv;charset=utf-8;",
-    });
+    const blob = new Blob([csv], { type: "text/csv;charset=utf-8;" });
     const url = URL.createObjectURL(blob);
     const a = document.createElement("a");
     a.href = url;
@@ -588,7 +630,9 @@ export default function OrderTable({
         accessorKey: "channel",
         header: "Channel",
         cell: ({ getValue }) =>
-          getValue<OrderChannel>() === "OFFLINE" ? "Offline Sale" : "Online Store",
+          getValue<OrderChannel>() === "OFFLINE"
+            ? "Offline Sale"
+            : "Online Store",
       },
       {
         id: "customer",
@@ -614,7 +658,7 @@ export default function OrderTable({
         cell: ({ row }) => {
           const name = row.original.deliveryOption?.name || "";
           const fee = row.original.deliveryFee;
-          const details = row.original.deliveryDetails;
+          const details = (row.original as any).deliveryDetails;
           return (
             <div className="text-sm">
               {name ? <div className="font-medium">{name}</div> : null}
@@ -637,9 +681,13 @@ export default function OrderTable({
           const order = row.original;
           const isUpdatingStatus = updatingIds.has(order.id);
           const isLabelBusy = labelBusyIds.has(order.id);
+
           const isShipbubbleOrder =
-            (order.deliveryOption?.provider || "").toLowerCase() ===
-            "shipbubble";
+            (order.deliveryOption?.provider || "").toLowerCase() === "shipbubble";
+
+          // ✅ NEW: if OFFLINE + pickup → hide label buttons
+          const isPickup = order.channel === "OFFLINE" && isInPersonPickupOrder(order);
+          const showShipbubbleButtons = isShipbubbleOrder && !isPickup;
 
           const hasLabel = !!(order as any).hasShipbubbleLabel;
 
@@ -657,9 +705,7 @@ export default function OrderTable({
 
               <Select
                 value={order.status}
-                onValueChange={(v) =>
-                  handleStatusChange(order.id, v as OrderStatus)
-                }
+                onValueChange={(v) => handleStatusChange(order.id, v as OrderStatus)}
                 disabled={isUpdatingStatus}
               >
                 <SelectTrigger className="h-8 px-2 w-[120px]">
@@ -678,52 +724,51 @@ export default function OrderTable({
                 <RefreshCcw className="animate-spin h-4 w-4 text-gray-600" />
               )}
 
-              {/* Create Label — emerald */}
-              <Button
-                variant={hasLabel || !isShipbubbleOrder ? "outline" : "default"}
-                size="icon"
-                className={
-                  hasLabel || !isShipbubbleOrder
-                    ? "text-gray-500"
-                    : "bg-emerald-600 hover:bg-emerald-700 text-white"
-                }
-                title={
-                  !isShipbubbleOrder
-                    ? "Shipbubble not configured for this order"
-                    : hasLabel
-                    ? "Shipment label already created"
-                    : "Create Shipbubble shipment label"
-                }
-                disabled={!isShipbubbleOrder || hasLabel || isLabelBusy}
-                onClick={() => handleCreateShipmentLabel(order)}
-                aria-label="Create shipment label"
-              >
-                <PackagePlus className="h-5 w-5" />
-              </Button>
+              {/* ✅ Only render Shipbubble label controls when applicable */}
+              {showShipbubbleButtons && (
+                <>
+                  {/* Create Label — emerald */}
+                  <Button
+                    variant={hasLabel ? "outline" : "default"}
+                    size="icon"
+                    className={
+                      hasLabel
+                        ? "text-gray-500"
+                        : "bg-emerald-600 hover:bg-emerald-700 text-white"
+                    }
+                    title={
+                      hasLabel
+                        ? "Shipment label already created"
+                        : "Create Shipbubble shipment label"
+                    }
+                    disabled={hasLabel || isLabelBusy}
+                    onClick={() => handleCreateShipmentLabel(order)}
+                    aria-label="Create shipment label"
+                  >
+                    <PackagePlus className="h-5 w-5" />
+                  </Button>
 
-              {/* Cancel Label — destructive red */}
-              <Button
-                variant="destructive"
-                size="icon"
-                className={
-                  hasLabel && !isLabelBusy
-                    ? "bg-red-600 hover:bg-red-700 text-white"
-                    : "bg-red-300 text-white opacity-60"
-                }
-                title={
-                  hasLabel
-                    ? "Cancel Shipbubble shipment label"
-                    : "No shipment label to cancel"
-                }
-                disabled={!hasLabel || isLabelBusy}
-                onClick={() => handleCancelShipmentLabel(order)}
-                aria-label="Cancel shipment label"
-              >
-                <PackageX className="h-5 w-5" />
-              </Button>
+                  {/* Cancel Label — destructive red */}
+                  <Button
+                    variant="destructive"
+                    size="icon"
+                    className={
+                      hasLabel && !isLabelBusy
+                        ? "bg-red-600 hover:bg-red-700 text-white"
+                        : "bg-red-300 text-white opacity-60"
+                    }
+                    title={hasLabel ? "Cancel Shipbubble shipment label" : "No shipment label to cancel"}
+                    disabled={!hasLabel || isLabelBusy}
+                    onClick={() => handleCancelShipmentLabel(order)}
+                    aria-label="Cancel shipment label"
+                  >
+                    <PackageX className="h-5 w-5" />
+                  </Button>
 
-              {isLabelBusy && (
-                <RefreshCcw className="animate-spin h-4 w-4 text-gray-600" />
+                  {isLabelBusy && (
+                    <RefreshCcw className="animate-spin h-4 w-4 text-gray-600" />
+                  )}
+                </>
               )}
             </div>
           );
@@ -764,10 +809,7 @@ export default function OrderTable({
                 className="w-full max-w-sm"
               />
               <div className="flex space-x-2">
-                <Select
-                  value={statusFilter}
-                  onValueChange={(v) => setStatusFilter(v as any)}
-                >
+                <Select value={statusFilter} onValueChange={(v) => setStatusFilter(v as any)}>
                   <SelectTrigger className="w-[160px]">
                     <SelectValue placeholder="All Statuses" />
                   </SelectTrigger>
@@ -780,10 +822,8 @@ export default function OrderTable({
                     ))}
                   </SelectContent>
                 </Select>
-                <Select
-                  value={currencyFilter}
-                  onValueChange={(v) => setCurrencyFilter(v as any)}
-                >
+
+                <Select value={currencyFilter} onValueChange={(v) => setCurrencyFilter(v as any)}>
                   <SelectTrigger className="w-[160px]">
                     <SelectValue placeholder="All Currencies" />
                   </SelectTrigger>
@@ -819,19 +859,14 @@ export default function OrderTable({
                     >
                       {!header.isPlaceholder && (
                         <div className="flex items-center">
-                          {flexRender(
-                            header.column.columnDef.header,
-                            header.getContext()
-                          )}
+                          {flexRender(header.column.columnDef.header, header.getContext())}
                           {canSort && (
                             <span className="ml-1">
                               {
                                 {
                                   asc: <ChevronUp className="h-4 w-4" />,
                                   desc: <ChevronDown className="h-4 w-4" />,
-                                }[
-                                  header.column.getIsSorted() as string
-                                ] ?? null
+                                }[header.column.getIsSorted() as string] ?? null
                               }
                             </span>
                           )}
@@ -843,6 +878,7 @@ export default function OrderTable({
               </TableRow>
             ))}
           </TableHeader>
+
           <TableBody>
             {table.getRowModel().rows.map((row) => (
               <TableRow
@@ -856,6 +892,7 @@ export default function OrderTable({
                 ))}
               </TableRow>
             ))}
+
             {filtered.length === 0 && (
               <TableRow>
                 <TableCell
@@ -872,22 +909,13 @@ export default function OrderTable({
 
       {showPagination && (
         <div className="flex items-center justify-between py-4">
-          <Button
-            variant="link"
-            onClick={() => table.previousPage()}
-            disabled={!table.getCanPreviousPage()}
-          >
+          <Button variant="link" onClick={() => table.previousPage()} disabled={!table.getCanPreviousPage()}>
             ← Prev
           </Button>
           <span className="text-sm text-gray-700">
-            Page {table.getState().pagination.pageIndex + 1} of{" "}
-            {table.getPageCount()}
+            Page {table.getState().pagination.pageIndex + 1} of {table.getPageCount()}
           </span>
-          <Button
-            variant="link"
-            onClick={() => table.nextPage()}
-            disabled={!table.getCanNextPage()}
-          >
+          <Button variant="link" onClick={() => table.nextPage()} disabled={!table.getCanNextPage()}>
             Next →
           </Button>
           <select
@@ -932,10 +960,7 @@ export default function OrderTable({
               <Button variant="outline" onClick={() => setReceiptOpen(false)}>
                 Close
               </Button>
-              <Button
-                variant="secondary"
-                onClick={() => handlePrint(receiptOrder!)}
-              >
+              <Button variant="secondary" onClick={() => handlePrint(receiptOrder!)}>
                 <Printer className="mr-1 h-4 w-4" /> Print
               </Button>
             </DialogFooter>

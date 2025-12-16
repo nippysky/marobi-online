@@ -62,11 +62,106 @@ function toPrismaJson(
     JSON.stringify(value);
     return value as Prisma.InputJsonValue;
   } catch {
-    // last-resort stringify if something non-serializable sneaks in
     return JSON.parse(
       JSON.stringify({ invalid: true, original: String(value) })
     ) as Prisma.InputJsonValue;
   }
+}
+
+function safeJsonParse(input: unknown): unknown {
+  if (typeof input !== "string") return input;
+  const t = input.trim();
+  if (!t.startsWith("{") && !t.startsWith("[")) return input;
+  try {
+    return JSON.parse(t);
+  } catch {
+    return input;
+  }
+}
+
+function isShipbubbleDetails(dd: unknown): boolean {
+  const obj = safeJsonParse(dd);
+  if (!obj || typeof obj !== "object") return false;
+
+  const anyObj: any = obj;
+  const src = String(anyObj?.source ?? "").toLowerCase();
+  if (src === "shipbubble") return true;
+
+  // common markers from different shapes
+  if (anyObj?.shipbubble) return true;
+  if (anyObj?.requestToken || anyObj?.request_token) return true;
+  if (anyObj?.courierId || anyObj?.courier_id) return true;
+  if (anyObj?.serviceCode || anyObj?.service_code) return true;
+  if (anyObj?.quote?.quoteId) return true;
+  if (anyObj?.rate?.courierName || anyObj?.rate?.serviceCode) return true;
+
+  return false;
+}
+
+function normalizeShipbubbleDeliveryDetails(dd: unknown): unknown {
+  const parsed = safeJsonParse(dd);
+
+  // leave non-objects (e.g. "PICKUP: ...") untouched
+  if (!parsed || typeof parsed !== "object") return parsed;
+
+  const o: any = parsed;
+
+  const requestToken =
+    o?.quote?.quoteId ??
+    o?.shipbubble?.requestToken ??
+    o?.requestToken ??
+    o?.request_token ??
+    o?.raw?.request_token ??
+    null;
+
+  const serviceCode =
+    o?.quote?.serviceCode ??
+    o?.shipbubble?.serviceCode ??
+    o?.rate?.serviceCode ??
+    o?.serviceCode ??
+    o?.service_code ??
+    o?.raw?.service_code ??
+    null;
+
+  const courierId =
+    o?.shipbubble?.courierId ??
+    o?.rate?.courierId ??
+    o?.courierId ??
+    o?.courier_id ??
+    o?.raw?.courier_id ??
+    null;
+
+  const courierName =
+    o?.shipbubble?.courierName ??
+    o?.rate?.courierName ??
+    o?.courierName ??
+    o?.raw?.courier_name ??
+    null;
+
+  // Merge without destroying existing data
+  const shipbubble = {
+    ...(o?.shipbubble && typeof o.shipbubble === "object" ? o.shipbubble : {}),
+    ...(requestToken ? { requestToken: String(requestToken) } : {}),
+    ...(serviceCode ? { serviceCode: String(serviceCode) } : {}),
+    ...(courierId ? { courierId: String(courierId) } : {}),
+    ...(courierName ? { courierName: String(courierName) } : {}),
+  };
+
+  const out = {
+    ...o,
+    source: "Shipbubble", // helps your email + makes it consistent
+    ...(requestToken ? { requestToken: String(requestToken) } : {}),
+    ...(serviceCode ? { serviceCode: String(serviceCode) } : {}),
+    ...(courierId ? { courierId: String(courierId) } : {}),
+    ...(courierName ? { courierName: String(courierName) } : {}),
+    shipbubble,
+    raw: {
+      ...(o?.raw && typeof o.raw === "object" ? o.raw : {}),
+      normalized_at: new Date().toISOString(),
+    },
+  };
+
+  return out;
 }
 
 /* ────────────────────────────────────────────────────────────
@@ -184,10 +279,19 @@ export async function POST(req: NextRequest) {
       };
     }
 
+    // ── Normalize + detect Shipbubble delivery JSON (important!)
+    const shipbubbleUsed = isShipbubbleDetails(deliveryDetails);
+    const normalizedDeliveryDetails = shipbubbleUsed
+      ? normalizeShipbubbleDeliveryDetails(deliveryDetails)
+      : safeJsonParse(deliveryDetails);
+
     // ── Optional delivery option
+    // FIX: If Shipbubble is used but deliveryOptionId wasn't passed,
+    // auto-attach an active deliveryOption whose provider/name indicates Shipbubble.
     let deliveryOptionRecord:
       | { id: string; baseFee: number | null }
       | null = null;
+
     if (deliveryOptionId) {
       const opt = await prisma.deliveryOption.findUnique({
         where: { id: deliveryOptionId },
@@ -199,10 +303,30 @@ export async function POST(req: NextRequest) {
         );
       }
       deliveryOptionRecord = { id: opt.id, baseFee: opt.baseFee ?? null };
+    } else if (shipbubbleUsed) {
+      const opt = await prisma.deliveryOption.findFirst({
+        where: {
+          active: true,
+          OR: [
+            // provider matches (recommended)
+            { provider: { equals: "shipbubble", mode: "insensitive" } },
+            // fallback: name contains shipbubble
+            { name: { contains: "shipbubble", mode: "insensitive" } },
+          ],
+        },
+        orderBy: { createdAt: "asc" as any },
+      });
+
+      if (opt) {
+        deliveryOptionRecord = { id: opt.id, baseFee: opt.baseFee ?? null };
+      }
+      // If none exists, we won't block the order creation—
+      // BUT (important) your admin UI "Create Label" button relies on deliveryOption.provider,
+      // so you should ensure you have at least one Shipbubble deliveryOption in DB.
     }
 
-    // Normalize JSON input
-    const deliveryDetailsInput = toPrismaJson(deliveryDetails);
+    // Normalize JSON input for Prisma storage
+    const deliveryDetailsInput = toPrismaJson(normalizedDeliveryDetails);
 
     // ─────────────────────────────────────────────────────────
     // Transaction: stock checks → reserve serial → create order
@@ -258,9 +382,7 @@ export async function POST(req: NextRequest) {
               `Variant not found: ${raw.productId} ${raw.color}/${raw.size}`
             );
           if (variant.stock < raw.quantity)
-            throw new Error(
-              `Insufficient stock for ${variant.product.name}`
-            );
+            throw new Error(`Insufficient stock for ${variant.product.name}`);
 
           // decrement stock
           await tx.variant.update({
@@ -330,7 +452,6 @@ export async function POST(req: NextRequest) {
         const nextSerial = await tx.orderSerial.create({ data: {} });
         const orderId = formatOrderIdFromSerial(nextSerial.id);
 
-        // (defensive) ensure it matches the pattern
         if (!/^M-ORD-\d{3,}$/.test(orderId)) {
           throw new Error(
             `Order ID formatting failed for serial ${nextSerial.id}`
@@ -433,7 +554,6 @@ export async function POST(req: NextRequest) {
         const rawDetails = order.deliveryDetails as any;
 
         if (typeof rawDetails === "string" && rawDetails) {
-          // Pickup notes were stored as "PICKUP: ..." or "PICKUP"
           if (rawDetails.toUpperCase().startsWith("PICKUP")) {
             if (!order.deliveryOption) {
               deliveryMethodLabel = "In-person pickup";
@@ -443,8 +563,7 @@ export async function POST(req: NextRequest) {
             deliveryDetailsText = rawDetails;
           }
         } else if (rawDetails && typeof rawDetails === "object") {
-          // Shipbubble format from offline form:
-          // { source: "Shipbubble", requestToken, rate: { courierName, serviceCode, fee, eta }, note }
+          // normalized: source === "Shipbubble"
           if (rawDetails.source === "Shipbubble") {
             const rate = rawDetails.rate || {};
             const note = rawDetails.note;
@@ -452,8 +571,10 @@ export async function POST(req: NextRequest) {
               deliveryMethodLabel = "Shipbubble Delivery";
             }
 
-            const courierName = rate.courierName || "Courier";
-            const serviceCode = rate.serviceCode ? ` (${rate.serviceCode})` : "";
+            const courierName = rate.courierName || rawDetails.courierName || "Courier";
+            const serviceCode = (rate.serviceCode || rawDetails.serviceCode)
+              ? ` (${rate.serviceCode || rawDetails.serviceCode})`
+              : "";
             const eta = rate.eta ? ` • ETA: ${rate.eta}` : "";
             const feePart =
               typeof rate.fee === "number"
@@ -465,7 +586,6 @@ export async function POST(req: NextRequest) {
               deliveryDetailsText += ` • Note: ${note}`;
             }
           } else {
-            // Fallback for any unexpected object shape
             try {
               deliveryDetailsText = JSON.stringify(rawDetails);
             } catch {
@@ -577,11 +697,11 @@ export async function POST(req: NextRequest) {
         }
       } catch (emailErr: any) {
         console.warn("Failed to send receipt email:", emailErr);
-        const receiptStatus = await prisma.receiptEmailStatus.findUnique({
+        const receiptStatus2 = await prisma.receiptEmailStatus.findUnique({
           where: { orderId: order.id },
         });
-        if (receiptStatus) {
-          const attempts = receiptStatus.attempts;
+        if (receiptStatus2) {
+          const attempts = receiptStatus2.attempts;
           const delayMs = Math.min(
             24 * 60 * 60 * 1000,
             60 * 60 * 1000 * Math.pow(2, attempts)
@@ -607,8 +727,7 @@ export async function POST(req: NextRequest) {
   } catch (err: any) {
     console.error("Offline-sale POST error:", err);
     const msg =
-      typeof err?.message === "string" &&
-      err.message.startsWith("Insufficient")
+      typeof err?.message === "string" && err.message.startsWith("Insufficient")
         ? err.message
         : "Internal Server Error";
     const status = msg === "Internal Server Error" ? 500 : 400;

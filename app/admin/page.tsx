@@ -51,9 +51,18 @@ function normalizeAddress(o: {
   return "—";
 }
 
+function isPickupText(raw: unknown): boolean {
+  if (typeof raw !== "string") return false;
+  const t = raw.trim().toLowerCase();
+  return t.startsWith("pickup") || t.includes("in-person pickup") || t.includes("walk-in");
+}
+
 /** Extract courierName from deliveryDetails in a defensive way. */
 function extractCourierName(raw: unknown): string | null {
   if (!raw) return null;
+
+  // ✅ Don't ever treat pickup markers as a courier
+  if (isPickupText(raw)) return null;
 
   let obj: any = raw;
   if (typeof raw === "string") {
@@ -102,12 +111,23 @@ function extractWeightKg(obj: Record<string, any>): string | null {
 
 /**
  * Summarize delivery details for the table (Courier • Weight • ETA).
- * Prefer the chosen courier name (from deliveryDetails) over provider labels.
+ * Also handles pickup cleanly.
  */
 function humanizeDeliveryDetails(
   raw: unknown,
   deliveryOption?: { name?: string | null }
 ): string {
+  // ✅ Pickup: keep it human + optional note
+  if (isPickupText(raw)) {
+    const s = String(raw).trim();
+    const pickupLabel = "In-person Pickup";
+
+    // If it looks like "PICKUP: something", show "In-person Pickup • Note: something"
+    const parts = s.split(":");
+    const note = parts.length > 1 ? parts.slice(1).join(":").trim() : "";
+    return note ? `${pickupLabel} • Note: ${note}` : pickupLabel;
+  }
+
   const derivedCourier = extractCourierName(raw);
   const baseLabel = (derivedCourier || deliveryOption?.name || "—").trim();
 
@@ -214,7 +234,11 @@ async function fetchRecentOrders(): Promise<OrderRow[]> {
         phone: o.customer.phone,
         address: normalizeAddress({ customer: o.customer, guestInfo: o.guestInfo }),
       };
-    } else if (o.guestInfo && typeof o.guestInfo === "object" && !Array.isArray(o.guestInfo)) {
+    } else if (
+      o.guestInfo &&
+      typeof o.guestInfo === "object" &&
+      !Array.isArray(o.guestInfo)
+    ) {
       const gi = o.guestInfo as Record<string, string>;
       customerObj = {
         id: null,
@@ -249,14 +273,23 @@ async function fetchRecentOrders(): Promise<OrderRow[]> {
       customSize: normalizeCustomSize(it.customSize),
     }));
 
-    // Prefer courier from deliveryDetails if deliveryOption is missing.
+    // ✅ Prefer courier from deliveryDetails only when it's NOT pickup.
     const derivedCourier = extractCourierName(o.deliveryDetails as any);
+
+    const isPickup =
+      (o.deliveryOption?.name?.toLowerCase?.() ?? "").includes("pickup") ||
+      isPickupText(o.deliveryDetails as any);
+
     const deliveryOption: OrderRow["deliveryOption"] =
       o.deliveryOption
         ? {
             id: o.deliveryOption.id,
-            name: o.deliveryOption.name?.trim() || o.deliveryOption.provider?.trim() || "Shipbubble",
-            provider: o.deliveryOption.provider ?? null,
+            name:
+              (isPickup ? "In-person Pickup" : o.deliveryOption.name)?.trim() ||
+              o.deliveryOption.provider?.trim() ||
+              "—",
+            // ✅ pickup should never look like shipbubble on the client
+            provider: isPickup ? null : (o.deliveryOption.provider ?? null),
             type: "COURIER",
           }
         : derivedCourier

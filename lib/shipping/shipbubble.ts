@@ -212,9 +212,10 @@ export async function validateAddressExact(
     name: String(input.name || "").trim(),
     address: String(input.address || "").trim(),
     ...(typeof input.latitude === "number" ? { latitude: input.latitude } : {}),
-    ...(typeof input.longitude === "number" ? { longitude: input.longitude } : {}),
+    ...(typeof input.longitude === "number"
+      ? { longitude: input.longitude }
+      : {}),
   };
-
 
   try {
     const resp = await sbFetch<ValidateResp>("/shipping/address/validate", {
@@ -225,13 +226,15 @@ export async function validateAddressExact(
     const data = (resp as any).data ?? {};
     if (!data?.address_code) {
       if (DEBUG) {
-        console.error("[Shipbubble][Address][validate] missing address_code in response", data);
+        console.error(
+          "[Shipbubble][Address][validate] missing address_code in response",
+          data
+        );
       }
       throw new Error(
         "Shipbubble could not validate this address. Please check the address string."
       );
     }
-
 
     return data as ValidatedAddressData;
   } catch (err: any) {
@@ -278,8 +281,6 @@ export function pickBoxForWeight(
   );
   const chosen =
     sorted.find((b) => Number(b.max_weight) >= Number(totalWeightKg)) || null;
-
-
 
   return chosen;
 }
@@ -348,10 +349,7 @@ export type RatesRespRaw = {
   [k: string]: any;
 };
 
-export async function fetchRatesExact(
-  body: FetchRatesBody
-): Promise<RatesRespRaw> {
-
+export async function fetchRatesExact(body: FetchRatesBody): Promise<RatesRespRaw> {
   const resp = await sbFetch<RatesRespRaw>("/shipping/fetch_rates", {
     method: "POST",
     body: JSON.stringify(body),
@@ -366,7 +364,6 @@ export async function fetchRatesForSelected(
   serviceCodesCsv: string,
   body: FetchRatesBody
 ): Promise<RatesRespRaw> {
-
   const resp = await sbFetch<RatesRespRaw>(
     `/shipping/fetch_rates/${encodeURIComponent(serviceCodesCsv)}`,
     {
@@ -435,8 +432,7 @@ export type ShipbubbleShipmentData = {
   [k: string]: any;
 };
 
-export type ShipbubbleCreateShipmentResponse =
-  ShipbubbleOk<ShipbubbleShipmentData>;
+export type ShipbubbleCreateShipmentResponse = ShipbubbleOk<ShipbubbleShipmentData>;
 
 export async function createShipmentLabelExact({
   requestToken,
@@ -451,7 +447,6 @@ export async function createShipmentLabelExact({
   insuranceCode?: string;
   isCodLabel?: boolean;
 }): Promise<ShipbubbleCreateShipmentResponse> {
-
   const body: {
     request_token: string;
     service_code: string;
@@ -472,7 +467,6 @@ export async function createShipmentLabelExact({
     timeoutMs: 20000,
   });
 
-
   return resp as ShipbubbleCreateShipmentResponse;
 }
 
@@ -482,11 +476,10 @@ export async function cancelShipmentLabel(orderId: string): Promise<void> {
   if (!orderId) throw new Error("Shipbubble order_id required to cancel");
 
   const path = `/shipping/labels/cancel/${encodeURIComponent(orderId)}`;
-  const resp = await sbFetch<{ status?: string; message?: string }>(path, {
+  await sbFetch<{ status?: string; message?: string }>(path, {
     method: "POST",
     timeoutMs: 20000,
   });
-
 }
 
 /* ───────────────────────── List multiple by IDs ────────────────────── */
@@ -503,27 +496,40 @@ export type ShipbubbleListByIdsResp = {
   results: ShipbubbleListItem[];
 };
 
+/** ✅ NEW: per-call overrides for timeout/retry */
+export type ShipbubbleRequestOptions = {
+  timeoutMs?: number;
+  retry?: number;
+};
+
 /** Fetch up to 50 shipments per call by their Shipbubble order_ids */
 export async function listShipmentsByIds(
-  externalOrderIds: string[]
+  externalOrderIds: string[],
+  opts: ShipbubbleRequestOptions = {}
 ): Promise<ShipbubbleListItem[]> {
   if (!externalOrderIds?.length) return [];
+
   const chunks: string[][] = [];
   for (let i = 0; i < externalOrderIds.length; i += 50) {
     chunks.push(externalOrderIds.slice(i, i + 50));
   }
+
   const out: ShipbubbleListItem[] = [];
+
   for (const chunk of chunks) {
     const csv = chunk.map((s) => encodeURIComponent(String(s))).join(",");
+
     const resp = await sbFetch<any>(`/shipping/labels/list/${csv}`, {
       method: "GET",
+      ...(typeof opts.timeoutMs === "number" ? { timeoutMs: opts.timeoutMs } : {}),
+      ...(typeof opts.retry === "number" ? { retry: opts.retry } : {}),
     });
+
     const data = (resp as any)?.data ?? {};
-    const list: ShipbubbleListItem[] = Array.isArray(data.results)
-      ? data.results
-      : [];
+    const list: ShipbubbleListItem[] = Array.isArray(data.results) ? data.results : [];
     out.push(...list);
   }
+
   return out;
 }
 
@@ -602,9 +608,7 @@ export function buildDeliveryDetailsV1(args: {
       courier: args.rate.courierName,
       currency: args.rate.currency as DeliveryDetailsV1["quote"]["currency"],
       amount: args.rate.total,
-      deliveryEtaDays: Number(
-        args.rate.deliveryEtaText?.match(/\d+/)?.[0] || ""
-      ),
+      deliveryEtaDays: Number(args.rate.deliveryEtaText?.match(/\d+/)?.[0] || ""),
     },
     parcel: { weightKg: args.totalWeightKg, dimensionsCm: args.dims },
     addresses: { from: args.from, to: args.to },
