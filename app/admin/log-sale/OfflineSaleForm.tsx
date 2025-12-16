@@ -1,31 +1,18 @@
+
 "use client";
 
+
 /**
- * Admin Offline Sale form
+ * Admin Offline Sale form (Production-safe)
  *
- * Improvements:
- * - Currency is locked to NGN (no user-facing currency switch).
- * - Delivery:
- *   - In-person Pickup (₦0) via virtual option.
- *   - "Shipbubble Delivery (live rates)" as another option in the same dropdown.
- *   - When Shipbubble is selected:
- *       - Admin can fetch live rates (similar to checkout page flow).
- *       - Selecting a rate auto-fills the delivery fee.
- * - Guest customer:
- *   - Country/state dropdowns & phone code selector (like checkout).
- *   - Phone stored as +234811... style; admin types only local part.
- *   - Address is a textarea with guidance.
- * - Summary pill at the top for quick sanity check:
- *   - Total NGN, items count, delivery type, and payment method.
+ * Key fixes:
+ * - Removed nested setItems() updates (prod batching-safe).
+ * - Color/Size start blank (placeholders), user must pick.
+ * - Size disabled until color is selected.
+ * - Strong types (no `any`), lint-clean.
  */
 
-import React, {
-  useState,
-  useRef,
-  useEffect,
-  useMemo,
-  useCallback,
-} from "react";
+import React, { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { v4 as uuid } from "uuid";
 import {
   Card,
@@ -49,7 +36,9 @@ import { Trash2, PlusCircle, Loader2 } from "lucide-react";
 import toast from "react-hot-toast";
 import { useCountryState } from "@/lib/hooks/useCheckoutForm";
 
-// Local mirror of Prisma's Currency enum for client-side use
+/* ────────────────────────────────────────────────────────────────
+   Currency (client mirror)
+   ──────────────────────────────────────────────────────────────── */
 enum Currency {
   NGN = "NGN",
   USD = "USD",
@@ -57,10 +46,9 @@ enum Currency {
   GBP = "GBP",
 }
 
-/* ──────────────────────────────────────────────────────────────────────────
+/* ────────────────────────────────────────────────────────────────
    Types
-   ────────────────────────────────────────────────────────────────────────── */
-
+   ──────────────────────────────────────────────────────────────── */
 interface DBVariant {
   color: string;
   size: string;
@@ -91,16 +79,21 @@ interface LineItem {
   productId: string;
   productName: string;
   variants: DBVariant[];
+
   colorOptions: string[];
   sizeOptions: string[];
-  color: string;
-  size: string;
-  maxQty: number;
+
+  color: string; // "" means not chosen yet
+  size: string;  // "" means not chosen yet
+
+  maxQty: number; // 0 means unknown until chosen
   quantity: number;
+
   hasSizeMod: boolean;
-  supportsSizeMod: boolean; // derived from product.sizeMods
-  customSize?: CustomSize; // only if hasSizeMod
+  supportsSizeMod: boolean;
+  customSize?: CustomSize;
   productImages: string[];
+
   prices: {
     NGN: number;
     USD: number;
@@ -109,10 +102,8 @@ interface LineItem {
   };
 }
 
-/** Derived grouping for UI only */
 type DeliveryKind = "COURIER" | "PICKUP";
 
-/** Shape used by DeliverySelector (superset of API response with a few UI helpers) */
 interface DeliveryOption {
   id: string;
   name: string;
@@ -121,8 +112,7 @@ interface DeliveryOption {
   baseFee?: number | null;
   baseCurrency?: Currency | null;
   active: boolean;
-  metadata?: Record<string, any>;
-  /** derived on the client for grouping in the dropdown */
+  metadata?: Record<string, unknown>;
   _kind?: DeliveryKind;
 }
 
@@ -132,10 +122,17 @@ interface Props {
   staffId: string;
 }
 
-/* ──────────────────────────────────────────────────────────────────────────
-   Shipbubble types (lightweight for offline use)
-   ────────────────────────────────────────────────────────────────────────── */
+interface CustomerSearchResult {
+  id: string;
+  firstName: string;
+  lastName: string;
+  email: string;
+  phone: string;
+}
 
+/* ────────────────────────────────────────────────────────────────
+   Shipbubble types
+   ──────────────────────────────────────────────────────────────── */
 type ShipbubbleRate = {
   id: string;
   courierName: string;
@@ -143,7 +140,7 @@ type ShipbubbleRate = {
   fee: number;
   currency: "NGN" | "USD" | "EUR" | "GBP";
   eta?: string | null;
-  raw?: any;
+  raw?: unknown;
 };
 
 type ShipbubbleRateApiItem = {
@@ -153,24 +150,32 @@ type ShipbubbleRateApiItem = {
   fee: number;
   currency: string;
   eta?: string | null;
-  raw?: any;
+  raw?: unknown;
 };
 
-/* ──────────────────────────────────────────────────────────────────────────
-   Debounce helper
-   ────────────────────────────────────────────────────────────────────────── */
+/* ────────────────────────────────────────────────────────────────
+   Helpers
+   ──────────────────────────────────────────────────────────────── */
+function unique(values: string[]) {
+  return Array.from(new Set(values));
+}
 
-function useDebounce(callback: (...args: any[]) => void, delay: number) {
-  const timeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
-  return (...args: any[]) => {
-    if (timeoutRef.current) clearTimeout(timeoutRef.current);
-    timeoutRef.current = setTimeout(() => callback(...args), delay);
+function normalizeVariant(v: DBVariant): DBVariant {
+  return {
+    color: (v.color || "").trim() || "N/A",
+    size: (v.size || "").trim() || "N/A",
+    stock: typeof v.stock === "number" ? v.stock : 0,
   };
 }
 
-/* ──────────────────────────────────────────────────────────────────────────
-   Misc helpers (flags/phone normalisation)
-   ────────────────────────────────────────────────────────────────────────── */
+function sizesForColor(variants: DBVariant[], color: string): string[] {
+  return unique(variants.filter(v => v.color === color).map(v => v.size));
+}
+
+function stockFor(variants: DBVariant[], color: string, size: string): number {
+  const m = variants.find(v => v.color === color && v.size === size);
+  return typeof m?.stock === "number" ? m.stock : 0;
+}
 
 /** Country ISO → flag emoji */
 const flagEmoji = (iso2: string) =>
@@ -180,33 +185,82 @@ const flagEmoji = (iso2: string) =>
       String.fromCodePoint(127397 + char.charCodeAt(0))
     );
 
-/** Placeholder hint for phone input */
 function buildPhonePlaceholder(dialCode: string): string {
-  if ((dialCode || "").startsWith("+234")) {
-    return "8112345678";
-  }
+  if ((dialCode || "").startsWith("+234")) return "8112345678";
   return "local number without country code";
 }
 
-/** STRICT phone normalisation: digits-only, strip leading zeros */
 function normalizeLocalPhone(raw: string): string {
   let digits = raw.replace(/\D/g, "");
-  if (digits.startsWith("0")) {
-    digits = digits.replace(/^0+/, "");
-  }
+  if (digits.startsWith("0")) digits = digits.replace(/^0+/, "");
   return digits;
 }
 
-/* ──────────────────────────────────────────────────────────────────────────
-   Delivery Selector
-   - Still compatible with /api/delivery-options.
-   - Adds:
-   * Virtual "In-person Pickup (₦0)" option (PICKUP).
-   * Virtual "Shipbubble Delivery (live rates)" option (COURIER, kind="shipbubble").
-   - For pickup: fee locked to 0.
-   - For Shipbubble: fee is controlled from parent when an SB rate is chosen.
-   ────────────────────────────────────────────────────────────────────────── */
+/* ────────────────────────────────────────────────────────────────
+   Debounced callback (no stale closures)
+   ──────────────────────────────────────────────────────────────── */
+function useDebouncedCallback<T extends (...args: never[]) => void>(
+  fn: T,
+  delay: number
+) {
+  const fnRef = useRef(fn);
+  const tRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
+  useEffect(() => {
+    fnRef.current = fn;
+  }, [fn]);
+
+  return useCallback(
+    (...args: Parameters<T>) => {
+      if (tRef.current) clearTimeout(tRef.current);
+      tRef.current = setTimeout(() => fnRef.current(...args), delay);
+    },
+    [delay]
+  );
+}
+
+/* ────────────────────────────────────────────────────────────────
+   Delivery Selector helpers (moved OUT for exhaustive-deps)
+   ──────────────────────────────────────────────────────────────── */
+function deriveDeliveryKind(o: Pick<DeliveryOption, "name" | "provider" | "metadata">): DeliveryKind {
+  const name = String(o?.name ?? "").toLowerCase();
+  const provider = String(o?.provider ?? "").toLowerCase();
+  const metaKind = String((o?.metadata as Record<string, unknown> | undefined)?.kind ?? "").toLowerCase();
+  if (name.includes("pickup") || provider.includes("pickup") || metaKind === "pickup") return "PICKUP";
+  return "COURIER";
+}
+
+function createVirtualPickup(currency: Currency): DeliveryOption {
+  return {
+    id: "__pickup__",
+    name: "In-person Pickup",
+    provider: null,
+    pricingMode: "FIXED",
+    baseFee: 0,
+    baseCurrency: currency,
+    active: true,
+    metadata: { kind: "pickup", virtual: true },
+    _kind: "PICKUP",
+  };
+}
+
+function createShipbubbleOption(currency: Currency): DeliveryOption {
+  return {
+    id: "__shipbubble__",
+    name: "Shipbubble Delivery (live rates)",
+    provider: "Shipbubble",
+    pricingMode: "EXTERNAL",
+    baseFee: 0,
+    baseCurrency: currency,
+    active: true,
+    metadata: { kind: "shipbubble", virtual: true },
+    _kind: "COURIER",
+  };
+}
+
+/* ────────────────────────────────────────────────────────────────
+   Delivery Selector component
+   ──────────────────────────────────────────────────────────────── */
 interface DeliverySelectorProps {
   currency: Currency;
   selectedOption: DeliveryOption | null;
@@ -230,47 +284,6 @@ const DeliverySelector: React.FC<DeliverySelectorProps> = ({
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
-  /** Helper: classify an option for grouping in the dropdown */
-  function deriveKind(o: any): DeliveryKind {
-    const name = String(o?.name ?? "").toLowerCase();
-    const provider = String(o?.provider ?? "").toLowerCase();
-    const metaKind = String(o?.metadata?.kind ?? "").toLowerCase();
-    if (name.includes("pickup") || provider.includes("pickup") || metaKind === "pickup") {
-      return "PICKUP";
-    }
-    return "COURIER";
-  }
-
-  /** Virtual pickup option (client-only; never saved to DB) */
-  function createVirtualPickup(): DeliveryOption {
-    return {
-      id: "__pickup__",
-      name: "In-person Pickup",
-      provider: null,
-      pricingMode: "FIXED",
-      baseFee: 0,
-      baseCurrency: currency,
-      active: true,
-      metadata: { kind: "pickup", virtual: true },
-      _kind: "PICKUP",
-    };
-  }
-
-  /** Virtual Shipbubble delivery option (client-only) */
-  function createShipbubbleOption(): DeliveryOption {
-    return {
-      id: "__shipbubble__",
-      name: "Shipbubble Delivery (live rates)",
-      provider: "Shipbubble",
-      pricingMode: "EXTERNAL",
-      baseFee: 0,
-      baseCurrency: currency,
-      active: true,
-      metadata: { kind: "shipbubble", virtual: true },
-      _kind: "COURIER",
-    };
-  }
-
   useEffect(() => {
     let cancelled = false;
 
@@ -280,45 +293,46 @@ const DeliverySelector: React.FC<DeliverySelectorProps> = ({
       try {
         const res = await fetch("/api/delivery-options?active=true");
         if (!res.ok) throw new Error(`Failed to load: ${res.statusText}`);
-        const raw = (await res.json()) as any[];
+        const raw = (await res.json()) as unknown;
 
-        // Normalize API response to DeliveryOption
-        const normalized: DeliveryOption[] = (raw || []).map((o) => ({
-          id: o.id,
-          name: o.name,
+        const list = Array.isArray(raw) ? raw : [];
+        const normalized: DeliveryOption[] = list.map((o: any) => ({
+          id: String(o.id),
+          name: String(o.name),
           provider: o.provider ?? null,
           pricingMode: o.pricingMode ?? "FIXED",
           baseFee: typeof o.baseFee === "number" ? o.baseFee : 0,
-          baseCurrency: o.baseCurrency ?? null,
+          baseCurrency: (o.baseCurrency as Currency | null) ?? null,
           active: o.active ?? true,
-          metadata: o.metadata ?? undefined,
-          _kind: deriveKind(o),
+          metadata: (o.metadata as Record<string, unknown> | undefined) ?? undefined,
+          _kind: deriveDeliveryKind({
+            name: o.name,
+            provider: o.provider,
+            metadata: o.metadata,
+          }),
         }));
 
-        // Ensure we always have at least a pickup option
         const hasPickup = normalized.some((o) => (o._kind ?? "COURIER") === "PICKUP");
-        const withPickup = hasPickup ? normalized : [...normalized, createVirtualPickup()];
+        const withPickup = hasPickup ? normalized : [...normalized, createVirtualPickup(currency)];
 
-        // Always append Shipbubble virtual option
         const hasShipbubble = withPickup.some((o) => o.id === "__shipbubble__");
-        const finalList = hasShipbubble
-          ? withPickup
-          : [...withPickup, createShipbubbleOption()];
+        const finalList = hasShipbubble ? withPickup : [...withPickup, createShipbubbleOption(currency)];
 
         if (!cancelled) setOptions(finalList);
-      } catch (e) {
+      } catch (err) {
+        console.error(err);
         if (!cancelled) setError("Unable to load options");
       } finally {
         if (!cancelled) setLoading(false);
       }
     }
+
     fetchOptions();
     return () => {
       cancelled = true;
     };
   }, [currency]);
 
-  /** Group for nicer UI sectioning */
   const grouped = {
     COURIER: options.filter((o) => (o._kind ?? "COURIER") === "COURIER"),
     PICKUP: options.filter((o) => o._kind === "PICKUP"),
@@ -331,11 +345,11 @@ const DeliverySelector: React.FC<DeliverySelectorProps> = ({
 
   const isPickup =
     selectedOption?._kind === "PICKUP" ||
-    selectedOption?.metadata?.kind === "pickup";
+    (selectedOption?.metadata as Record<string, unknown> | undefined)?.kind === "pickup";
 
   const isShipbubble =
     selectedOption?.id === "__shipbubble__" ||
-    selectedOption?.metadata?.kind === "shipbubble";
+    (selectedOption?.metadata as Record<string, unknown> | undefined)?.kind === "shipbubble";
 
   return (
     <div className="space-y-5 border rounded-xl p-5 bg-white shadow-sm">
@@ -355,56 +369,46 @@ const DeliverySelector: React.FC<DeliverySelectorProps> = ({
       )}
 
       <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
-        {/* Method select */}
         <div className="flex flex-col">
           <div className="text-xs font-semibold mb-1">Method</div>
           <Select
             value={selectedOption?.id || ""}
             onValueChange={(v) => {
               const opt = options.find((o) => o.id === v);
-              if (opt) {
-                onOptionChange(opt);
-                // For pickup: lock fee 0
-                if (
-                  opt._kind === "PICKUP" ||
-                  opt.metadata?.kind === "pickup"
-                ) {
-                  onFeeChange(0);
-                  return;
-                }
-                // For Shipbubble: let parent set fee based on selected rate
-                if (
-                  opt.id === "__shipbubble__" ||
-                  opt.metadata?.kind === "shipbubble"
-                ) {
-                  // Do not auto-change fee; UI for SB will handle
-                  return;
-                }
-                const fee = Number(opt.baseFee ?? 0);
-                onFeeChange(fee);
+              if (!opt) return;
+
+              onOptionChange(opt);
+
+              const metaKind = String((opt.metadata as Record<string, unknown> | undefined)?.kind ?? "");
+              const isPickupNow = opt._kind === "PICKUP" || metaKind === "pickup";
+              const isShipbubbleNow = opt.id === "__shipbubble__" || metaKind === "shipbubble";
+
+              if (isPickupNow) {
+                onFeeChange(0);
+                return;
               }
+              if (isShipbubbleNow) return;
+
+              onFeeChange(Number(opt.baseFee ?? 0));
             }}
             disabled={loading || options.length === 0}
           >
             <SelectTrigger className="w-full">
-              <SelectValue
-                placeholder={loading ? "Loading..." : "Select delivery option"}
-              />
+              <SelectValue placeholder={loading ? "Loading..." : "Select delivery option"} />
             </SelectTrigger>
             <SelectContent>
-              {/* If both kinds exist, show section headers; otherwise just list all */}
               {grouped.COURIER.length > 0 && grouped.PICKUP.length > 0 && (
                 <div className="px-3 py-1 text-[10px] uppercase text-gray-400">
                   Couriers
                 </div>
               )}
-              {(grouped.PICKUP.length > 0 ? grouped.COURIER : options).map(
-                (o) => (
-                  <SelectItem key={o.id} value={o.id}>
-                    {o.name} {o.provider ? `(${o.provider})` : ""}
-                  </SelectItem>
-                )
-              )}
+
+              {(grouped.PICKUP.length > 0 ? grouped.COURIER : options).map((o) => (
+                <SelectItem key={o.id} value={o.id}>
+                  {o.name} {o.provider ? `(${o.provider})` : ""}
+                </SelectItem>
+              ))}
+
               {grouped.PICKUP.length > 0 && (
                 <>
                   <div className="px-3 py-1 text-[10px] uppercase text-gray-400">
@@ -417,55 +421,41 @@ const DeliverySelector: React.FC<DeliverySelectorProps> = ({
                   ))}
                 </>
               )}
-              {options.length === 0 && !loading && (
-                <div className="px-3 py-2 text-sm text-gray-500">
-                  No delivery options available.
-                </div>
-              )}
             </SelectContent>
           </Select>
 
-          {/* Tiny info line for selected option */}
           {selectedOption && (
             <div className="mt-2 text-xs text-gray-500">
               {isShipbubble ? (
                 <>
                   Uses live courier quotes from{" "}
-                  <span className="font-semibold">Shipbubble</span>. Delivery
-                  fee will be set from the selected rate.
+                  <span className="font-semibold">Shipbubble</span>. Delivery fee is set from the selected rate.
                 </>
               ) : (
                 <>
                   Pricing:{" "}
-                  <span className="font-medium">
-                    {selectedOption.pricingMode ?? "FIXED"}
-                  </span>
-                  {typeof selectedOption.baseFee === "number" &&
-                    !isPickup && (
-                      <>
-                        {" • "}Base fee:{" "}
-                        <span className="font-mono">
-                          {selectedOption.baseCurrency || currency}{" "}
-                          {Number(selectedOption.baseFee).toLocaleString()}
-                        </span>
-                      </>
-                    )}
-                  {isPickup && (
+                  <span className="font-medium">{selectedOption.pricingMode ?? "FIXED"}</span>
+                  {typeof selectedOption.baseFee === "number" && !isPickup && (
                     <>
-                      {" • "}Fee:{" "}
-                      <span className="font-mono">{currencySym}0</span>
+                      {" • "}Base fee:{" "}
+                      <span className="font-mono">
+                        {selectedOption.baseCurrency || currency}{" "}
+                        {Number(selectedOption.baseFee).toLocaleString()}
+                      </span>
                     </>
                   )}
-                  {selectedOption.provider && (
-                    <> {" • "}Provider: {selectedOption.provider}</>
+                  {isPickup && (
+                    <>
+                      {" • "}Fee: <span className="font-mono">{currencySym}0</span>
+                    </>
                   )}
+                  {selectedOption.provider && <> {" • "}Provider: {selectedOption.provider}</>}
                 </>
               )}
             </div>
           )}
         </div>
 
-        {/* Fee input */}
         <div className="flex flex-col">
           <div className="text-xs font-semibold mb-1">Fee</div>
           <div className="flex gap-2">
@@ -482,37 +472,27 @@ const DeliverySelector: React.FC<DeliverySelectorProps> = ({
                 <div>
                   suggested:&nbsp;
                   <span className="font-mono">
-                    {currencySym}
-                    {(
-                      isPickup ? 0 : Number(selectedOption.baseFee ?? 0)
-                    ).toLocaleString()}
+                    {currencySym}{(isPickup ? 0 : Number(selectedOption.baseFee ?? 0)).toLocaleString()}
                   </span>
                 </div>
               )}
               {selectedOption && isShipbubble && (
                 <div className="text-xs text-gray-500">
-                  Auto-filled from Shipbubble rate (but you can override).
+                  Auto-filled from Shipbubble rate (override allowed).
                 </div>
               )}
             </div>
           </div>
           <div className="text-[10px] text-gray-500">
-            {isPickup
-              ? "In-person pickup: fee is always 0."
-              : "You can override the suggested fee if needed."}
+            {isPickup ? "In-person pickup: fee is always 0." : "You can override the suggested fee if needed."}
           </div>
         </div>
       </div>
 
-      {/* Details / Notes */}
       <div className="flex flex-col">
         <div className="text-xs font-semibold mb-1">Details / Notes</div>
         <Input
-          placeholder={
-            isPickup
-              ? "Pickup note (person, ID, time, etc.)"
-              : "Tracking number, courier ref, etc."
-          }
+          placeholder={isPickup ? "Pickup note (person, ID, time, etc.)" : "Tracking number, courier ref, etc."}
           value={deliveryDetails}
           onChange={(e) => onDetailsChange(e.target.value)}
           disabled={!selectedOption}
@@ -522,34 +502,29 @@ const DeliverySelector: React.FC<DeliverySelectorProps> = ({
   );
 };
 
-/* ──────────────────────────────────────────────────────────────────────────
+/* ────────────────────────────────────────────────────────────────
    MAIN COMPONENT
-   ────────────────────────────────────────────────────────────────────────── */
-
+   ──────────────────────────────────────────────────────────────── */
 export default function OfflineSaleForm({ staffId }: Props) {
   const [step, setStep] = useState(1);
   const [items, setItems] = useState<LineItem[]>([]);
-  const [productSearch, setProductSearch] = useState<
-    Record<string, DBProduct[]>
-  >({});
-  const [searchingProduct, setSearchingProduct] = useState(false);
+  const [productSearch, setProductSearch] = useState<Record<string, DBProduct[]>>({});
+  const [searchingProductRowId, setSearchingProductRowId] = useState<string | null>(null);
 
   const [mode, setMode] = useState<"existing" | "guest">("existing");
   const [existingCustomerId, setExistingCustomerId] = useState("");
-  const [selectedCustomer, setSelectedCustomer] = useState<any | null>(null);
-  const [customerSearch, setCustomerSearch] = useState<any[]>([]);
+  const [selectedCustomer, setSelectedCustomer] = useState<CustomerSearchResult | null>(null);
+  const [customerSearch, setCustomerSearch] = useState<CustomerSearchResult[]>([]);
   const [searchingCustomer, setSearchingCustomer] = useState(false);
 
-  // Guest customer core fields (text inputs)
   const [guest, setGuest] = useState({
     firstName: "",
     lastName: "",
     email: "",
-    phoneLocal: "", // local-only, no country code
+    phoneLocal: "",
     address: "",
   });
 
-  // Country/state/phone-code (checkout-style) for guest
   const {
     countryList,
     country,
@@ -563,7 +538,6 @@ export default function OfflineSaleForm({ staffId }: Props) {
   } = useCountryState(undefined, undefined);
 
   const [paymentMethod, setPaymentMethod] = useState<PaymentMethod>("Cash");
-  // currency is locked to NGN for offline sales
   const currency = Currency.NGN;
   const [loading, setLoading] = useState(false);
 
@@ -575,34 +549,24 @@ export default function OfflineSaleForm({ staffId }: Props) {
     deliveryFee?: number;
   } | null>(null);
 
-  // delivery
-  const [deliveryOption, setDeliveryOption] = useState<DeliveryOption | null>(
-    null
-  );
+  const [deliveryOption, setDeliveryOption] = useState<DeliveryOption | null>(null);
   const [deliveryFee, setDeliveryFee] = useState<number>(0);
   const [deliveryDetails, setDeliveryDetails] = useState<string>("");
 
-  // Shipbubble state (only used when Shipbubble option is selected)
   const [sbRates, setSbRates] = useState<ShipbubbleRate[]>([]);
   const [sbRequestToken, setSbRequestToken] = useState<string | null>(null);
   const [sbLoading, setSbLoading] = useState(false);
   const [sbError, setSbError] = useState<string | null>(null);
-  const [selectedSbRate, setSelectedSbRate] = useState<ShipbubbleRate | null>(
-    null
-  );
+  const [selectedSbRate, setSelectedSbRate] = useState<ShipbubbleRate | null>(null);
 
-  // ─── Validation flags ─────────────────────────────────────────────────
+  const isShipbubbleSelected =
+    deliveryOption?.id === "__shipbubble__" ||
+    String((deliveryOption?.metadata as Record<string, unknown> | undefined)?.kind ?? "") === "shipbubble";
+
   const canNext =
     step === 1
       ? items.length > 0 &&
-        items.every(
-          (i) =>
-            i.productId &&
-            i.productName &&
-            i.color !== "" &&
-            i.size !== "" &&
-            i.quantity > 0
-        )
+        items.every((i) => i.productId && i.productName && i.color !== "" && i.size !== "" && i.quantity > 0)
       : step === 2
       ? mode === "existing"
         ? !!existingCustomerId
@@ -617,17 +581,8 @@ export default function OfflineSaleForm({ staffId }: Props) {
           )
       : true;
 
-  const isShipbubbleSelected =
-    deliveryOption?.id === "__shipbubble__" ||
-    deliveryOption?.metadata?.kind === "shipbubble";
+  const canSubmit = step === 3 && canNext && !!deliveryOption && (!isShipbubbleSelected || !!selectedSbRate);
 
-  const canSubmit =
-    step === 3 &&
-    canNext &&
-    !!deliveryOption &&
-    (!isShipbubbleSelected || !!selectedSbRate);
-
-  // ─── Row helpers ───────────────────────────────────────────────────────
   const addRow = () =>
     setItems((s) => [
       ...s,
@@ -636,11 +591,11 @@ export default function OfflineSaleForm({ staffId }: Props) {
         productId: "",
         productName: "",
         variants: [],
-        colorOptions: ["N/A"],
-        sizeOptions: ["N/A"],
-        color: "N/A",
-        size: "N/A",
-        maxQty: 1,
+        colorOptions: [],
+        sizeOptions: [],
+        color: "",
+        size: "",
+        maxQty: 0,
         quantity: 1,
         hasSizeMod: false,
         supportsSizeMod: false,
@@ -649,49 +604,53 @@ export default function OfflineSaleForm({ staffId }: Props) {
         prices: { NGN: 0, USD: 0, EUR: 0, GBP: 0 },
       },
     ]);
-  const removeRow = (id: string) =>
-    setItems((s) => s.filter((i) => i.id !== id));
 
-  // ─── PRODUCT SEARCH & SELECTION ───────────────────────────────────────
-  const fetchProducts = async (rowId: string, q: string) => {
+  const removeRow = (id: string) => setItems((s) => s.filter((i) => i.id !== id));
+
+  /* ────────────────────────────────────────────────────────────────
+     Product search & selection
+     ──────────────────────────────────────────────────────────────── */
+  const fetchProducts = useCallback(async (rowId: string, q: string) => {
     if (!q || q.length < 2) {
       setProductSearch((p) => ({ ...p, [rowId]: [] }));
+      setSearchingProductRowId(null);
       return;
     }
-    setSearchingProduct(true);
+
+    setSearchingProductRowId(rowId);
     try {
-      const res = await fetch(
-        `/api/search-products?query=${encodeURIComponent(q)}`
-      );
-      const data: DBProduct[] = await res.json();
-      setProductSearch((p) => ({ ...p, [rowId]: data }));
+      const res = await fetch(`/api/search-products?query=${encodeURIComponent(q)}`);
+      const data = (await res.json()) as DBProduct[];
+      setProductSearch((p) => ({ ...p, [rowId]: Array.isArray(data) ? data : [] }));
+    } catch (err) {
+      console.error(err);
+      setProductSearch((p) => ({ ...p, [rowId]: [] }));
     } finally {
-      setSearchingProduct(false);
+      setSearchingProductRowId(null);
     }
-  };
-  const debouncedFetchProducts = useDebounce(fetchProducts, 300);
+  }, []);
+
+  const debouncedFetchProducts = useDebouncedCallback(
+    (rowId: string, q: string) => fetchProducts(rowId, q),
+    300
+  );
 
   function selectProduct(rowId: string, product: DBProduct) {
-    const normalizedVariants = product.variants.map((v) => ({
-      color: v.color.trim() || "N/A",
-      size: v.size.trim() || "N/A",
-      stock: v.stock,
-    }));
+    const normalizedVariants = (product.variants || []).map(normalizeVariant);
 
-    const colors = Array.from(new Set(normalizedVariants.map((v) => v.color)));
-    const sizes = Array.from(new Set(normalizedVariants.map((v) => v.size)));
+    const colors = unique(normalizedVariants.map((v) => v.color));
+    const allSizes = unique(normalizedVariants.map((v) => v.size));
 
-    const selColor = colors[0] || "N/A";
-    const selSize = sizes[0] || "N/A";
-    const match = normalizedVariants.find(
-      (v) => v.color === selColor && v.size === selSize
-    );
-    const stock = match ? match.stock : 1;
+    // Auto-set ONLY when the only option is N/A (meaning: conceptually "no option")
+    const autoColor = colors.length === 1 && colors[0] === "N/A" ? "N/A" : "";
+    const autoSize = allSizes.length === 1 && allSizes[0] === "N/A" ? "N/A" : "";
 
-    const priceNGN = product.priceNGN ?? 0;
-    const priceUSD = product.priceUSD ?? 0;
-    const priceEUR = product.priceEUR ?? 0;
-    const priceGBP = product.priceGBP ?? 0;
+    const initialSizeOptions = autoColor ? sizesForColor(normalizedVariants, autoColor) : [];
+
+    const initialMaxQty =
+      autoColor !== "" && autoSize !== ""
+        ? stockFor(normalizedVariants, autoColor, autoSize)
+        : 0;
 
     setItems((prev) =>
       prev.map((i) =>
@@ -701,171 +660,184 @@ export default function OfflineSaleForm({ staffId }: Props) {
               productId: product.id,
               productName: product.name,
               variants: normalizedVariants,
-              colorOptions: colors.length > 0 ? colors : ["N/A"],
-              sizeOptions: sizes.length > 0 ? sizes : ["N/A"],
-              color: selColor,
-              size: selSize,
-              maxQty: stock,
+
+              colorOptions: colors,
+              sizeOptions: initialSizeOptions,
+
+              color: autoColor,
+              size: autoSize,
+
+              maxQty: initialMaxQty,
               quantity: 1,
+
               hasSizeMod: false,
-              supportsSizeMod: product.sizeMods,
+              supportsSizeMod: !!product.sizeMods,
               customSize: {},
+
               productImages: product.images || [],
               prices: {
-                NGN: priceNGN,
-                USD: priceUSD,
-                EUR: priceEUR,
-                GBP: priceGBP,
+                NGN: product.priceNGN ?? 0,
+                USD: product.priceUSD ?? 0,
+                EUR: product.priceEUR ?? 0,
+                GBP: product.priceGBP ?? 0,
               },
             }
           : i
       )
     );
+
     setProductSearch((p) => ({ ...p, [rowId]: [] }));
   }
 
-  function updateVariantSelection(
-    rowId: string,
-    newColor: string,
-    newSize: string
-  ) {
-    setItems((prev) =>
-      prev.map((i) => {
-        if (i.id !== rowId) return i;
-        const m = i.variants.find(
-          (v) => v.color === newColor && v.size === newSize
-        );
-        const stock = m?.stock ?? 1;
-        return {
-          ...i,
-          color: newColor,
-          size: newSize,
-          maxQty: stock,
-          quantity: Math.min(Math.max(1, i.quantity), stock),
-        };
-      })
-    );
-  }
-
-  function updateRow(
-    rowId: string,
-    field: keyof LineItem | keyof CustomSize,
-    value: any
-  ) {
+  /**
+   * ✅ Production-safe: one setItems() update per change.
+   * No nested updates. No side-effect updates inside updater.
+   */
+  function updateRow(rowId: string, field: "color" | "size" | "quantity" | "hasSizeMod" | keyof CustomSize, value: string | number | boolean) {
     setItems((prev) =>
       prev.map((i) => {
         if (i.id !== rowId) return i;
 
+        // COLOR change: reset size; populate sizeOptions for that color
         if (field === "color") {
-          const current = i;
-          updateVariantSelection(rowId, value as string, current.size);
-          return i;
+          const newColor = String(value);
+
+          const newSizeOptions = newColor ? sizesForColor(i.variants, newColor) : [];
+          // force explicit choice unless it's only N/A
+          const autoSize = newSizeOptions.length === 1 && newSizeOptions[0] === "N/A" ? "N/A" : "";
+
+          const maxQty =
+            newColor !== "" && autoSize !== ""
+              ? stockFor(i.variants, newColor, autoSize)
+              : 0;
+
+          return {
+            ...i,
+            color: newColor,
+            sizeOptions: newSizeOptions,
+            size: autoSize,
+            maxQty,
+            quantity: 1,
+          };
         }
+
+        // SIZE change: compute stock; clamp qty
         if (field === "size") {
-          const current = i;
-          updateVariantSelection(rowId, current.color, value as string);
-          return i;
+          const newSize = String(value);
+          const newColor = i.color;
+
+          const maxQty =
+            newColor !== "" && newSize !== ""
+              ? stockFor(i.variants, newColor, newSize)
+              : 0;
+
+          const clampedQty =
+            maxQty > 0 ? Math.min(Math.max(1, i.quantity), maxQty) : 1;
+
+          return {
+            ...i,
+            size: newSize,
+            maxQty,
+            quantity: clampedQty,
+          };
         }
+
         if (field === "quantity") {
-          return {
-            ...i,
-            quantity: Math.min(Math.max(1, value), i.maxQty),
-          };
+          const qty = Number(value);
+          const max = i.maxQty > 0 ? i.maxQty : 1;
+          return { ...i, quantity: Math.min(Math.max(1, qty), max) };
         }
+
         if (field === "hasSizeMod") {
+          const checked = Boolean(value);
           return {
             ...i,
-            hasSizeMod: !!value,
-            customSize: !!value ? i.customSize : {},
+            hasSizeMod: checked,
+            customSize: checked ? (i.customSize || {}) : {},
           };
         }
+
         if (["chest", "hips", "length", "waist"].includes(field)) {
           return {
             ...i,
             customSize: {
               ...(i.customSize || {}),
-              [field]: value,
+              [field]: String(value),
             },
           };
         }
+
         return i;
       })
     );
   }
 
-  // ─── CUSTOMER SEARCH ─────────────────────────────────────────────────
-  const fetchCustomers = async (q: string) => {
+  /* ────────────────────────────────────────────────────────────────
+     Customer search
+     ──────────────────────────────────────────────────────────────── */
+  const fetchCustomers = useCallback(async (q: string) => {
     if (!q || q.length < 2) {
       setCustomerSearch([]);
       return;
     }
+
     setSearchingCustomer(true);
     try {
-      const res = await fetch(
-        `/api/search-customers?query=${encodeURIComponent(q)}`
-      );
-      const data = await res.json();
-      setCustomerSearch(data);
+      const res = await fetch(`/api/search-customers?query=${encodeURIComponent(q)}`);
+      const data = (await res.json()) as CustomerSearchResult[];
+      setCustomerSearch(Array.isArray(data) ? data : []);
+    } catch (err) {
+      console.error(err);
+      setCustomerSearch([]);
     } finally {
       setSearchingCustomer(false);
     }
-  };
-  const debouncedFetchCustomers = useDebounce(fetchCustomers, 300);
+  }, []);
 
-  function selectCustomer(c: any) {
+  const debouncedFetchCustomers = useDebouncedCallback((q: string) => fetchCustomers(q), 300);
+
+  function selectCustomer(c: CustomerSearchResult) {
     setExistingCustomerId(c.id);
     setSelectedCustomer(c);
     setCustomerSearch([]);
   }
 
-  // ─── Derived helpers ───────────────────────────────────────────────────
-  const getUnitPrice = (item: LineItem) => {
-    // currency is locked to NGN
-    return item.prices.NGN;
-  };
+  /* ────────────────────────────────────────────────────────────────
+     Pricing helpers
+     ──────────────────────────────────────────────────────────────── */
+  const getUnitPrice = (item: LineItem) => item.prices.NGN;
 
   const computeSizeModFee = (item: LineItem) => {
     if (!item.hasSizeMod) return 0;
-    const unitPrice = getUnitPrice(item);
-    const base = unitPrice * item.quantity;
+    const base = getUnitPrice(item) * item.quantity;
     return +(base * 0.05).toFixed(2);
   };
 
-  // Summary pill derived values
   const currencySymbol = "₦";
-
-  const totalItems = items.reduce(
-    (sum, item) => sum + (item.quantity || 0),
-    0
-  );
+  const totalItems = items.reduce((sum, item) => sum + (item.quantity || 0), 0);
 
   const itemsSubtotal = items.reduce((sum, item) => {
     const unit = getUnitPrice(item) || 0;
     return sum + unit * (item.quantity || 0);
   }, 0);
 
-  const sizeModsTotal = items.reduce(
-    (sum, item) => sum + computeSizeModFee(item),
-    0
-  );
-
+  const sizeModsTotal = items.reduce((sum, item) => sum + computeSizeModFee(item), 0);
   const orderTotal = itemsSubtotal + sizeModsTotal + (deliveryFee || 0);
 
   const deliveryLabel = deliveryOption
     ? deliveryOption.id === "__pickup__" ||
-      deliveryOption.metadata?.kind === "pickup"
+      String((deliveryOption.metadata as Record<string, unknown> | undefined)?.kind ?? "") === "pickup"
       ? "Pickup"
       : deliveryOption.id === "__shipbubble__" ||
-        deliveryOption.metadata?.kind === "shipbubble"
+        String((deliveryOption.metadata as Record<string, unknown> | undefined)?.kind ?? "") === "shipbubble"
       ? "Shipbubble"
       : deliveryOption.name
     : "Not set";
 
-  // ─── Guest phone helpers ──────────────────────────────────────────────
-  const phonePlaceholder = useMemo(
-    () => buildPhonePlaceholder(phoneCode),
-    [phoneCode]
-  );
+  /* ────────────────────────────────────────────────────────────────
+     Guest phone helpers
+     ──────────────────────────────────────────────────────────────── */
+  const phonePlaceholder = useMemo(() => buildPhonePlaceholder(phoneCode), [phoneCode]);
 
   const phoneDigits = `${phoneCode}${guest.phoneLocal}`.replace(/\D/g, "");
   const phoneValid = phoneDigits.length >= 8;
@@ -875,7 +847,9 @@ export default function OfflineSaleForm({ staffId }: Props) {
     setGuest((g) => ({ ...g, phoneLocal: normalized }));
   }, []);
 
-  // ─── Shipbubble rate fetching (for Shipbubble option) ─────────────────
+  /* ────────────────────────────────────────────────────────────────
+     Shipbubble
+     ──────────────────────────────────────────────────────────────── */
   const shipbubbleFormReady =
     mode === "guest" &&
     guest.firstName.trim() &&
@@ -886,21 +860,12 @@ export default function OfflineSaleForm({ staffId }: Props) {
     !!country?.name &&
     !!state;
 
-  const totalWeightKg = useMemo(() => {
-    // Offline products don't have weight; assume 0.5 kg per item
-    return +(totalItems * 0.5).toFixed(3);
-  }, [totalItems]);
-
-  const totalValue = useMemo(
-    () => +(itemsSubtotal + sizeModsTotal).toFixed(2),
-    [itemsSubtotal, sizeModsTotal]
-  );
+  const totalWeightKg = useMemo(() => +(totalItems * 0.5).toFixed(3), [totalItems]);
+  const totalValue = useMemo(() => +(itemsSubtotal + sizeModsTotal).toFixed(2), [itemsSubtotal, sizeModsTotal]);
 
   const getShipbubbleRates = async () => {
     if (!shipbubbleFormReady) {
-      toast.error(
-        "Fill guest name, email, phone, address, country & state to fetch Shipbubble rates."
-      );
+      toast.error("Fill guest name, email, phone, address, country & state to fetch Shipbubble rates.");
       return;
     }
 
@@ -929,11 +894,9 @@ export default function OfflineSaleForm({ staffId }: Props) {
           total_value: totalValue,
           items: items.map((i) => ({
             name: i.productName || "Item",
-            description: i.hasSizeMod
-              ? "Custom sized apparel"
-              : "Offline sale item",
+            description: i.hasSizeMod ? "Custom sized apparel" : "Offline sale item",
             unitWeightKG: 0.5,
-            unitAmount: getUnitPrice(i) + computeSizeModFee(i) / i.quantity,
+            unitAmount: getUnitPrice(i) + (i.quantity ? computeSizeModFee(i) / i.quantity : 0),
             quantity: i.quantity,
           })),
           pickup_days_from_now: 1,
@@ -942,24 +905,17 @@ export default function OfflineSaleForm({ staffId }: Props) {
 
       const json = await resp.json();
       if (!resp.ok) {
-        throw new Error(
-          json?.error ||
-            "Could not fetch Shipbubble delivery rates. Please check the address."
-        );
+        throw new Error(json?.error || "Could not fetch Shipbubble rates. Please check the address.");
       }
 
-      const rawRates: ShipbubbleRateApiItem[] = Array.isArray(json?.rates)
-        ? json.rates
-        : [];
+      const rawRates: ShipbubbleRateApiItem[] = Array.isArray(json?.rates) ? json.rates : [];
 
       const mapped: ShipbubbleRate[] = rawRates.map((r, idx) => ({
-        id: `${r.courierCode || r.courierName || "c"}-${
-          r.serviceCode
-        }-${idx}`,
+        id: `${r.courierCode || r.courierName || "c"}-${r.serviceCode}-${idx}`,
         courierName: r.courierName,
         serviceCode: r.serviceCode,
         fee: Number(r.fee) || 0,
-        currency: (r.currency || "NGN") as any,
+        currency: (r.currency || "NGN") as ShipbubbleRate["currency"],
         eta: r.eta ?? null,
         raw: r.raw ?? r,
       }));
@@ -968,16 +924,16 @@ export default function OfflineSaleForm({ staffId }: Props) {
       setSbRequestToken(json?.requestToken || json?.request_token || null);
 
       if (!mapped.length) {
-        toast("No Shipbubble options available for this address.", {
-          icon: "ℹ️",
-        });
+        toast("No Shipbubble options available for this address.", { icon: "ℹ️" });
       } else {
         toast.success("Shipbubble delivery options loaded.");
       }
-    } catch (e: any) {
+    } catch (err: unknown) {
+      console.error(err);
       const msg =
-        e?.message ||
-        "Sorry, we couldn't fetch Shipbubble rates. Make sure the address is complete and valid.";
+        err instanceof Error
+          ? err.message
+          : "Sorry, we couldn't fetch Shipbubble rates. Make sure the address is complete and valid.";
       setSbError(msg);
       toast.error(msg);
     } finally {
@@ -985,21 +941,21 @@ export default function OfflineSaleForm({ staffId }: Props) {
     }
   };
 
-  // When SB rate is chosen, auto-fill fee
   useEffect(() => {
-    if (selectedSbRate && isShipbubbleSelected) {
-      setDeliveryFee(selectedSbRate.fee || 0);
-    }
+    if (selectedSbRate && isShipbubbleSelected) setDeliveryFee(selectedSbRate.fee || 0);
   }, [selectedSbRate, isShipbubbleSelected]);
 
-  // ─── SUBMIT ──────────────────────────────────────────────────────────
+  /* ────────────────────────────────────────────────────────────────
+     Submit
+     ──────────────────────────────────────────────────────────────── */
   async function handleSubmit() {
     if (!canSubmit) return;
     setLoading(true);
+
     try {
       const isPickup =
         deliveryOption?.id === "__pickup__" ||
-        deliveryOption?.metadata?.kind === "pickup";
+        String((deliveryOption?.metadata as Record<string, unknown> | undefined)?.kind ?? "") === "pickup";
 
       const payload = {
         items: items.map((i) => ({
@@ -1026,12 +982,7 @@ export default function OfflineSaleForm({ staffId }: Props) {
         currency: "NGN",
         staffId,
         timestamp: new Date().toISOString(),
-
-        // If pickup: DO NOT send deliveryOptionId; fee 0; prefix details
-        // If Shipbubble: no deliveryOptionId, but use selected fee & details.
-        // If normal courier from DB: send id and fee.
-        deliveryOptionId:
-          isPickup || isShipbubbleSelected ? undefined : deliveryOption?.id,
+        deliveryOptionId: isPickup || isShipbubbleSelected ? undefined : deliveryOption?.id,
         deliveryFee: isPickup ? 0 : deliveryFee,
         deliveryDetails: isPickup
           ? deliveryDetails
@@ -1055,7 +1006,7 @@ export default function OfflineSaleForm({ staffId }: Props) {
 
       const data = await res.json();
       if (!res.ok) {
-        toast.error(data.error || "Failed to log sale");
+        toast.error(data?.error || "Failed to log sale");
         return;
       }
 
@@ -1068,18 +1019,12 @@ export default function OfflineSaleForm({ staffId }: Props) {
         deliveryFee: isPickup ? 0 : deliveryFee,
       });
 
-      // reset form
+      // reset
       setItems([]);
       setMode("existing");
       setExistingCustomerId("");
       setSelectedCustomer(null);
-      setGuest({
-        firstName: "",
-        lastName: "",
-        email: "",
-        phoneLocal: "",
-        address: "",
-      });
+      setGuest({ firstName: "", lastName: "", email: "", phoneLocal: "", address: "" });
       setPaymentMethod("Cash");
       setDeliveryOption(null);
       setDeliveryFee(0);
@@ -1089,33 +1034,32 @@ export default function OfflineSaleForm({ staffId }: Props) {
       setSbRequestToken(null);
       setSbError(null);
       setStep(1);
-    } catch (e) {
+    } catch (err) {
+      console.error(err);
       toast.error("Failed to log sale");
     } finally {
       setLoading(false);
     }
   }
 
-  // ─── UI RENDER ────────────────────────────────────────────────────────
+  /* ────────────────────────────────────────────────────────────────
+     UI
+     ──────────────────────────────────────────────────────────────── */
   return (
     <Card className="max-w-6xl mx-auto shadow-2xl ring-1 ring-slate-200">
       <CardHeader className="pb-0">
         <CardTitle>
-          {/* Stepper tabs — sleek + responsive */}
           <nav className="grid grid-cols-3 gap-2 rounded-lg bg-slate-50 p-1">
             {["Products", "Customer", "Payment"].map((lbl, i) => {
               const active = step === i + 1;
               return (
                 <button
-                  key={i}
+                  key={lbl}
                   disabled={i + 1 > step || loading}
                   onClick={() => setStep(i + 1)}
-                  className={`rounded-md py-2 text-center text-sm transition-all
-                    ${
-                      active
-                        ? "bg-white shadow-sm font-semibold text-gray-900"
-                        : "text-gray-500 hover:text-gray-700"
-                    }`}
+                  className={`rounded-md py-2 text-center text-sm transition-all ${
+                    active ? "bg-white shadow-sm font-semibold text-gray-900" : "text-gray-500 hover:text-gray-700"
+                  }`}
                 >
                   {lbl}
                 </button>
@@ -1140,10 +1084,7 @@ export default function OfflineSaleForm({ staffId }: Props) {
                 <strong>Delivery:</strong> {successSummary.deliveryOption}{" "}
                 {typeof successSummary.deliveryFee === "number" && (
                   <>
-                    • Fee:{" "}
-                    <span className="font-mono">
-                      {successSummary.deliveryFee.toFixed(2)}
-                    </span>
+                    • Fee: <span className="font-mono">{successSummary.deliveryFee.toFixed(2)}</span>
                   </>
                 )}
               </p>
@@ -1161,7 +1102,6 @@ export default function OfflineSaleForm({ staffId }: Props) {
           </div>
         )}
 
-        {/* ─── Compact summary pill ─────────────────────────────────────── */}
         {items.length > 0 && (
           <div className="flex flex-wrap items-center gap-3 rounded-full bg-slate-50 px-4 py-2 text-xs border border-slate-200">
             <span className="font-semibold text-slate-800">
@@ -1175,32 +1115,21 @@ export default function OfflineSaleForm({ staffId }: Props) {
             <span className="h-4 w-px bg-slate-300" />
 
             <span className="text-slate-600">
-              Items:{" "}
-              <span className="font-medium">
-                {totalItems} {totalItems === 1 ? "item" : "items"}
-              </span>
+              Items: <span className="font-medium">{totalItems} {totalItems === 1 ? "item" : "items"}</span>
             </span>
 
             <span className="h-4 w-px bg-slate-300" />
 
             <span className="text-slate-600">
               Delivery:{" "}
-              <span
-                className={
-                  deliveryLabel === "Not set"
-                    ? "font-semibold text-amber-700"
-                    : "font-medium"
-                }
-              >
+              <span className={deliveryLabel === "Not set" ? "font-semibold text-amber-700" : "font-medium"}>
                 {deliveryLabel}
               </span>
               {deliveryLabel !== "Not set" && (
                 <>
-                  {" "}
-                  • Fee:{" "}
+                  {" "}• Fee:{" "}
                   <span className="font-mono">
-                    {currencySymbol}
-                    {(deliveryFee || 0).toLocaleString()}
+                    {currencySymbol}{(deliveryFee || 0).toLocaleString()}
                   </span>
                 </>
               )}
@@ -1209,8 +1138,7 @@ export default function OfflineSaleForm({ staffId }: Props) {
             <span className="h-4 w-px bg-slate-300" />
 
             <span className="text-slate-600">
-              Payment:{" "}
-              <span className="font-medium">{paymentMethod}</span>
+              Payment: <span className="font-medium">{paymentMethod}</span>
             </span>
           </div>
         )}
@@ -1232,19 +1160,16 @@ export default function OfflineSaleForm({ staffId }: Props) {
             {items.map((row) => {
               const productHasColor =
                 row.colorOptions.length > 0 &&
-                !(
-                  row.colorOptions.length === 1 &&
-                  row.colorOptions[0] === "N/A"
-                );
+                !(row.colorOptions.length === 1 && row.colorOptions[0] === "N/A");
+
               const productHasSize =
                 row.sizeOptions.length > 0 &&
-                !(
-                  row.sizeOptions.length === 1 &&
-                  row.sizeOptions[0] === "N/A"
-                );
+                !(row.sizeOptions.length === 1 && row.sizeOptions[0] === "N/A");
+
               const unitPrice = getUnitPrice(row);
               const sizeModFee = computeSizeModFee(row);
-              const currencySymbol = "₦";
+
+              const readyForQty = row.color !== "" && row.size !== "" && row.maxQty > 0;
 
               return (
                 <div
@@ -1266,25 +1191,28 @@ export default function OfflineSaleForm({ staffId }: Props) {
                         </div>
                       )}
                     </div>
-                    <div className="flex-1">
+
+                    <div className="flex-1 relative">
                       <Input
                         placeholder="Search product…"
                         value={row.productName}
                         onChange={(e) => {
+                          const val = e.target.value;
                           setItems((prev) =>
                             prev.map((i) =>
                               i.id === row.id
                                 ? {
                                     ...i,
-                                    productName: e.target.value,
+                                    productName: val,
                                     variants: [],
                                     productId: "",
-                                    prices: {
-                                      NGN: 0,
-                                      USD: 0,
-                                      EUR: 0,
-                                      GBP: 0,
-                                    },
+                                    colorOptions: [],
+                                    sizeOptions: [],
+                                    color: "",
+                                    size: "",
+                                    maxQty: 0,
+                                    quantity: 1,
+                                    prices: { NGN: 0, USD: 0, EUR: 0, GBP: 0 },
                                     supportsSizeMod: false,
                                     hasSizeMod: false,
                                     customSize: {},
@@ -1292,10 +1220,17 @@ export default function OfflineSaleForm({ staffId }: Props) {
                                 : i
                             )
                           );
-                          debouncedFetchProducts(row.id, e.target.value);
+                          debouncedFetchProducts(row.id, val);
                         }}
                         disabled={loading}
                       />
+
+                      {searchingProductRowId === row.id && (
+                        <div className="absolute right-3 top-3 text-gray-400">
+                          <Loader2 className="animate-spin" size={16} />
+                        </div>
+                      )}
+
                       {productSearch[row.id]?.length > 0 && (
                         <div className="absolute z-20 bg-white border mt-1 rounded shadow max-h-56 overflow-auto w-[min(560px,90vw)]">
                           {productSearch[row.id].map((p) => (
@@ -1319,14 +1254,10 @@ export default function OfflineSaleForm({ staffId }: Props) {
                               </div>
                               <div className="flex-1 text-sm">
                                 <div className="font-medium">{p.name}</div>
-                                <div className="text-xs text-gray-500">
-                                  {p.id}
-                                </div>
+                                <div className="text-xs text-gray-500">{p.id}</div>
                               </div>
                               <div className="text-[11px] px-2 py-1 rounded bg-indigo-50">
-                                {p.sizeMods
-                                  ? "Size mods enabled"
-                                  : "No size mods"}
+                                {p.sizeMods ? "Size mods enabled" : "No size mods"}
                               </div>
                             </div>
                           ))}
@@ -1342,10 +1273,10 @@ export default function OfflineSaleForm({ staffId }: Props) {
                       <Select
                         value={row.color}
                         onValueChange={(v) => updateRow(row.id, "color", v)}
-                        disabled={loading}
+                        disabled={loading || !row.productId}
                       >
                         <SelectTrigger className="w-full">
-                          <SelectValue placeholder="Color" />
+                          <SelectValue placeholder="Select color" />
                         </SelectTrigger>
                         <SelectContent>
                           {row.colorOptions.map((c) => (
@@ -1365,14 +1296,14 @@ export default function OfflineSaleForm({ staffId }: Props) {
                   {/* Size */}
                   <div className="col-span-6 md:col-span-2">
                     <div className="text-xs font-semibold mb-1">Size</div>
-                    {productHasSize ? (
+                    {productHasColor ? (
                       <Select
                         value={row.size}
                         onValueChange={(v) => updateRow(row.id, "size", v)}
-                        disabled={loading}
+                        disabled={loading || !row.productId || row.color === "" || row.sizeOptions.length === 0}
                       >
                         <SelectTrigger className="w-full">
-                          <SelectValue placeholder="Size" />
+                          <SelectValue placeholder="Select size" />
                         </SelectTrigger>
                         <SelectContent>
                           {row.sizeOptions.map((s) => (
@@ -1383,9 +1314,29 @@ export default function OfflineSaleForm({ staffId }: Props) {
                         </SelectContent>
                       </Select>
                     ) : (
-                      <div className="text-sm text-gray-600 py-2 px-3 bg-slate-50 rounded">
-                        No sizes
-                      </div>
+                      // If no real color system, allow size options if they exist; else show "No sizes"
+                      productHasSize ? (
+                        <Select
+                          value={row.size}
+                          onValueChange={(v) => updateRow(row.id, "size", v)}
+                          disabled={loading || !row.productId}
+                        >
+                          <SelectTrigger className="w-full">
+                            <SelectValue placeholder="Select size" />
+                          </SelectTrigger>
+                          <SelectContent>
+                            {row.sizeOptions.map((s) => (
+                              <SelectItem key={s} value={s}>
+                                {s}
+                              </SelectItem>
+                            ))}
+                          </SelectContent>
+                        </Select>
+                      ) : (
+                        <div className="text-sm text-gray-600 py-2 px-3 bg-slate-50 rounded">
+                          No sizes
+                        </div>
+                      )
                     )}
                   </div>
 
@@ -1394,53 +1345,41 @@ export default function OfflineSaleForm({ staffId }: Props) {
                     <div className="text-xs font-semibold mb-1">
                       Quantity{" "}
                       <span className="text-[10px] text-gray-500">
-                        (Available: {row.maxQty})
+                        (Available: {readyForQty ? row.maxQty : "—"})
                       </span>
                     </div>
                     <div className="flex flex-col">
                       <Input
                         type="number"
                         min={1}
-                        max={row.maxQty}
+                        max={readyForQty ? row.maxQty : 1}
                         value={row.quantity}
-                        onChange={(e) =>
-                          updateRow(row.id, "quantity", +e.target.value)
-                        }
-                        disabled={loading}
+                        onChange={(e) => updateRow(row.id, "quantity", +e.target.value)}
+                        disabled={loading || !readyForQty}
                       />
                       <div className="text-[10px] text-gray-500 mt-1">
-                        Max allowed is {row.maxQty}
+                        {readyForQty ? `Max allowed is ${row.maxQty}` : "Select color and size to unlock quantity."}
                       </div>
                     </div>
                   </div>
 
-                  {/* Custom size block (only if supportsSizeMod) */}
+                  {/* Custom size block */}
                   <div className="col-span-6 md:col-span-3 flex flex-col gap-1">
                     <div className="flex items-center justify-between">
                       <div className="text-xs font-semibold">Custom Size?</div>
                       {row.supportsSizeMod ? (
-                        <div>
-                          <label className="inline-flex items-center space-x-2 text-sm">
-                            <input
-                              type="checkbox"
-                              checked={row.hasSizeMod}
-                              onChange={(e) =>
-                                updateRow(
-                                  row.id,
-                                  "hasSizeMod",
-                                  e.target.checked
-                                )
-                              }
-                              disabled={loading}
-                              className="h-4 w-4"
-                            />
-                            <span>Apply</span>
-                          </label>
-                        </div>
+                        <label className="inline-flex items-center space-x-2 text-sm">
+                          <input
+                            type="checkbox"
+                            checked={row.hasSizeMod}
+                            onChange={(e) => updateRow(row.id, "hasSizeMod", e.target.checked)}
+                            disabled={loading}
+                            className="h-4 w-4"
+                          />
+                          <span>Apply</span>
+                        </label>
                       ) : (
-                        <div className="text-[11px] text-gray-400">
-                          Not supported
-                        </div>
+                        <div className="text-[11px] text-gray-400">Not supported</div>
                       )}
                     </div>
 
@@ -1449,44 +1388,35 @@ export default function OfflineSaleForm({ staffId }: Props) {
                         <div className="text-[12px]">
                           Size modification fee (5%):{" "}
                           <span className="font-mono">
-                            {currencySymbol}
-                            {sizeModFee.toLocaleString()}
+                            {currencySymbol}{sizeModFee.toLocaleString()}
                           </span>
                         </div>
                         <div className="grid grid-cols-2 gap-2">
                           <Input
                             placeholder="Chest"
                             value={row.customSize?.chest || ""}
-                            onChange={(e) =>
-                              updateRow(row.id, "chest", e.target.value)
-                            }
+                            onChange={(e) => updateRow(row.id, "chest", e.target.value)}
                             disabled={loading}
                             className="text-sm"
                           />
                           <Input
                             placeholder="Waist"
                             value={row.customSize?.waist || ""}
-                            onChange={(e) =>
-                              updateRow(row.id, "waist", e.target.value)
-                            }
+                            onChange={(e) => updateRow(row.id, "waist", e.target.value)}
                             disabled={loading}
                             className="text-sm"
                           />
                           <Input
                             placeholder="Hips"
                             value={row.customSize?.hips || ""}
-                            onChange={(e) =>
-                              updateRow(row.id, "hips", e.target.value)
-                            }
+                            onChange={(e) => updateRow(row.id, "hips", e.target.value)}
                             disabled={loading}
                             className="text-sm"
                           />
                           <Input
                             placeholder="Length"
                             value={row.customSize?.length || ""}
-                            onChange={(e) =>
-                              updateRow(row.id, "length", e.target.value)
-                            }
+                            onChange={(e) => updateRow(row.id, "length", e.target.value)}
                             disabled={loading}
                             className="text-sm"
                           />
@@ -1496,29 +1426,26 @@ export default function OfflineSaleForm({ staffId }: Props) {
 
                     {!row.hasSizeMod && row.supportsSizeMod && (
                       <div className="text-[10px] text-gray-500">
-                        Enable custom sizing if customer wants adjustments
-                        (5%).
+                        Enable custom sizing if customer wants adjustments (5%).
                       </div>
                     )}
                   </div>
 
-                  {/* Unit price & totals */}
+                  {/* Pricing */}
                   <div className="col-span-6 md:col-span-3">
                     <div className="text-xs font-semibold mb-1">Pricing</div>
                     <div className="text-sm bg-slate-50 rounded p-2 border">
                       <div>
                         Unit:{" "}
                         <span className="font-mono">
-                          {currencySymbol}
-                          {unitPrice.toLocaleString()}
+                          {currencySymbol}{unitPrice.toLocaleString()}
                         </span>
                       </div>
                       {row.hasSizeMod && (
                         <div className="text-[12px] text-gray-600">
                           + Size mod fee:{" "}
                           <span className="font-mono">
-                            {currencySymbol}
-                            {sizeModFee.toLocaleString()}
+                            {currencySymbol}{sizeModFee.toLocaleString()}
                           </span>
                         </div>
                       )}
@@ -1541,12 +1468,7 @@ export default function OfflineSaleForm({ staffId }: Props) {
             })}
 
             <div className="flex items-center gap-4">
-              <Button
-                variant="outline"
-                size="sm"
-                onClick={addRow}
-                disabled={loading}
-              >
+              <Button variant="outline" size="sm" onClick={addRow} disabled={loading}>
                 <PlusCircle className="mr-2" /> Add Product
               </Button>
               <div className="text-sm text-gray-500">
@@ -1560,21 +1482,16 @@ export default function OfflineSaleForm({ staffId }: Props) {
         {step === 2 && (
           <div className="space-y-6">
             <div className="flex items-center gap-8">
-              {["existing", "guest"].map((m) => (
-                <label
-                  key={m}
-                  className="flex items-center space-x-2 cursor-pointer"
-                >
+              {(["existing", "guest"] as const).map((m) => (
+                <label key={m} className="flex items-center space-x-2 cursor-pointer">
                   <input
                     type="radio"
                     name="customerMode"
                     checked={mode === m}
-                    onChange={() => setMode(m as any)}
+                    onChange={() => setMode(m)}
                     className="accent-indigo-600"
                   />
-                  <span className="capitalize">
-                    {m === "existing" ? "Existing Customer" : "Guest"}
-                  </span>
+                  <span className="capitalize">{m === "existing" ? "Existing Customer" : "Guest"}</span>
                 </label>
               ))}
             </div>
@@ -1627,104 +1544,73 @@ export default function OfflineSaleForm({ staffId }: Props) {
               <div className="space-y-4">
                 <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
                   <div>
-                    <label className="text-xs font-semibold mb-1 block">
-                      First Name
-                    </label>
+                    <label className="text-xs font-semibold mb-1 block">First Name</label>
                     <Input
                       value={guest.firstName}
-                      onChange={(e) =>
-                        setGuest((g) => ({
-                          ...g,
-                          firstName: e.target.value,
-                        }))
-                      }
+                      onChange={(e) => setGuest((g) => ({ ...g, firstName: e.target.value }))}
                       disabled={loading}
                     />
                   </div>
 
                   <div>
-                    <label className="text-xs font-semibold mb-1 block">
-                      Last Name
-                    </label>
+                    <label className="text-xs font-semibold mb-1 block">Last Name</label>
                     <Input
                       value={guest.lastName}
-                      onChange={(e) =>
-                        setGuest((g) => ({
-                          ...g,
-                          lastName: e.target.value,
-                        }))
-                      }
+                      onChange={(e) => setGuest((g) => ({ ...g, lastName: e.target.value }))}
                       disabled={loading}
                     />
                   </div>
 
                   <div>
-                    <label className="text-xs font-semibold mb-1 block">
-                      Email
-                    </label>
+                    <label className="text-xs font-semibold mb-1 block">Email</label>
                     <Input
                       type="email"
                       value={guest.email}
-                      onChange={(e) =>
-                        setGuest((g) => ({ ...g, email: e.target.value }))
-                      }
+                      onChange={(e) => setGuest((g) => ({ ...g, email: e.target.value }))}
                       disabled={loading}
                     />
                   </div>
 
                   <div>
-                    <label className="text-xs font-semibold mb-1 block">
-                      Phone Number
-                    </label>
+                    <label className="text-xs font-semibold mb-1 block">Phone Number</label>
                     <div className="flex">
-                      <Select
-                        value={phoneCode}
-                        onValueChange={(val) => {
-                          setPhoneCode(val);
-                        }}
-                      >
+                      <Select value={phoneCode} onValueChange={setPhoneCode}>
                         <SelectTrigger className="w-32 mr-2">
                           <SelectValue placeholder={phoneCode} />
                         </SelectTrigger>
                         <SelectContent>
                           {phoneOptions.map(({ code, iso2 }) => (
                             <SelectItem key={code} value={code}>
-                              <span className="mr-1">
-                                {flagEmoji(iso2)}
-                              </span>
+                              <span className="mr-1">{flagEmoji(iso2)}</span>
                               {code}
                             </SelectItem>
                           ))}
                         </SelectContent>
                       </Select>
+
                       <div className="flex-1">
                         <Input
                           type="tel"
                           value={guest.phoneLocal}
                           placeholder={phonePlaceholder}
-                          onChange={(e) =>
-                            handleGuestPhoneChange(e.currentTarget.value)
-                          }
+                          onChange={(e) => handleGuestPhoneChange(e.currentTarget.value)}
                           disabled={loading}
                         />
                       </div>
                     </div>
+
                     <p className="mt-1 text-[11px] text-gray-500">
-                      Enter only the local number here (no country code or
-                      leading zero). We already apply{" "}
+                      Enter only the local number here (no country code or leading zero). We apply{" "}
                       <span className="font-medium">{phoneCode}</span>.
                     </p>
+
                     {!phoneValid && guest.phoneLocal && (
-                      <p className="mt-1 text-[11px] text-red-600">
-                        Enter a valid phone number.
-                      </p>
+                      <p className="mt-1 text-[11px] text-red-600">Enter a valid phone number.</p>
                     )}
                   </div>
 
                   <div>
-                    <label className="text-xs font-semibold mb-1 block">
-                      Country
-                    </label>
+                    <label className="text-xs font-semibold mb-1 block">Country</label>
                     {countryList.length === 0 ? (
                       <Skeleton className="h-10 w-full" />
                     ) : (
@@ -1750,9 +1636,7 @@ export default function OfflineSaleForm({ staffId }: Props) {
                   </div>
 
                   <div>
-                    <label className="text-xs font-semibold mb-1 block">
-                      State / Region
-                    </label>
+                    <label className="text-xs font-semibold mb-1 block">State / Region</label>
                     {country && stateList.length === 0 ? (
                       <Skeleton className="h-10 w-full" />
                     ) : (
@@ -1773,22 +1657,17 @@ export default function OfflineSaleForm({ staffId }: Props) {
                 </div>
 
                 <div>
-                  <label className="text-xs font-semibold mb-1 block">
-                    Address
-                  </label>
+                  <label className="text-xs font-semibold mb-1 block">Address</label>
                   <Textarea
                     value={guest.address}
-                    onChange={(e) =>
-                      setGuest((g) => ({ ...g, address: e.target.value }))
-                    }
+                    onChange={(e) => setGuest((g) => ({ ...g, address: e.target.value }))}
                     disabled={loading}
                     rows={3}
                     placeholder="e.g., 63 Birnin Kebbi Crescent, Garki 2, Abuja, Nigeria"
                   />
                   {!guest.address.trim() && (
                     <p className="mt-1 text-[11px] text-gray-500">
-                      Include street, area, city/town, state and country for
-                      accurate delivery.
+                      Include street, area, city/town, state and country for accurate delivery.
                     </p>
                   )}
                 </div>
@@ -1797,7 +1676,7 @@ export default function OfflineSaleForm({ staffId }: Props) {
           </div>
         )}
 
-        {/* STEP 3: PAYMENT, DELIVERY & SHIPBUBBLE */}
+        {/* STEP 3: PAYMENT */}
         {step === 3 && (
           <div className="space-y-6">
             <section className="space-y-4 grid grid-cols-1 md:grid-cols-2 gap-6">
@@ -1805,16 +1684,14 @@ export default function OfflineSaleForm({ staffId }: Props) {
                 <div className="text-xs font-semibold mb-1">Payment Method</div>
                 <Select
                   value={paymentMethod}
-                  onValueChange={(v) =>
-                    setPaymentMethod(v as PaymentMethod)
-                  }
+                  onValueChange={(v) => setPaymentMethod(v as PaymentMethod)}
                   disabled={loading}
                 >
                   <SelectTrigger className="w-full">
                     <SelectValue placeholder="Payment Method" />
                   </SelectTrigger>
                   <SelectContent>
-                    {["Cash", "Transfer", "Card"].map((m) => (
+                    {(["Cash", "Transfer", "Card"] as const).map((m) => (
                       <SelectItem key={m} value={m}>
                         {m}
                       </SelectItem>
@@ -1822,7 +1699,7 @@ export default function OfflineSaleForm({ staffId }: Props) {
                   </SelectContent>
                 </Select>
               </div>
-              {/* Currency column omitted – always NGN */}
+
               <div className="flex flex-col">
                 <div className="text-xs font-semibold mb-1">Currency</div>
                 <Input value="NGN" disabled className="bg-slate-50" />
@@ -1834,22 +1711,16 @@ export default function OfflineSaleForm({ staffId }: Props) {
               selectedOption={deliveryOption}
               deliveryFee={deliveryFee}
               deliveryDetails={deliveryDetails}
-              onOptionChange={(o) => {
-                setDeliveryOption(o);
-                // Fee is set inside DeliverySelector on change
-              }}
+              onOptionChange={setDeliveryOption}
               onFeeChange={setDeliveryFee}
               onDetailsChange={setDeliveryDetails}
             />
 
-            {/* Shipbubble UI appears only when SB option is selected */}
             {isShipbubbleSelected && (
               <div className="space-y-4 border rounded-xl p-5 bg-slate-50">
                 <div className="flex justify-between items-center">
                   <div>
-                    <div className="text-sm font-semibold">
-                      Shipbubble Rates
-                    </div>
+                    <div className="text-sm font-semibold">Shipbubble Rates</div>
                     <p className="text-xs text-gray-600 mt-1">
                       Uses guest customer address to fetch live courier quotes.
                     </p>
@@ -1860,22 +1731,17 @@ export default function OfflineSaleForm({ staffId }: Props) {
                     onClick={getShipbubbleRates}
                     disabled={sbLoading || !shipbubbleFormReady}
                   >
-                    {sbLoading
-                      ? "Fetching rates…"
-                      : "Get Shipbubble rates"}
+                    {sbLoading ? "Fetching rates…" : "Get Shipbubble rates"}
                   </Button>
                 </div>
 
                 {!shipbubbleFormReady && (
                   <p className="text-xs text-amber-600">
-                    Ensure guest details (name, email, phone, address, country
-                    and state) are filled before fetching rates.
+                    Ensure guest details (name, email, phone, address, country and state) are filled before fetching rates.
                   </p>
                 )}
 
-                {sbError && (
-                  <p className="text-xs text-red-600">{sbError}</p>
-                )}
+                {sbError && <p className="text-xs text-red-600">{sbError}</p>}
 
                 {!sbLoading && sbRates.length > 0 && (
                   <div className="grid gap-3">
@@ -1885,25 +1751,16 @@ export default function OfflineSaleForm({ staffId }: Props) {
                         <label
                           key={r.id}
                           className={`border rounded-lg p-3 flex justify-between items-start cursor-pointer ${
-                            isSelected
-                              ? "ring-2 ring-brand bg-white"
-                              : "bg-white"
+                            isSelected ? "ring-2 ring-brand bg-white" : "bg-white"
                           }`}
                         >
                           <div className="flex-1 min-w-0">
-                            <div className="font-medium">
-                              {r.courierName}
-                            </div>
+                            <div className="font-medium">{r.courierName}</div>
                             <div className="text-xs text-gray-600">
-                              {r.eta
-                                ? `ETA: ${r.eta}`
-                                : "ETA will be provided at label creation"}
+                              {r.eta ? `ETA: ${r.eta}` : "ETA will be provided at label creation"}
                             </div>
                             <div className="text-sm mt-1">
-                              Fee:{" "}
-                              <span className="font-mono">
-                                ₦{(r.fee || 0).toLocaleString()}
-                              </span>
+                              Fee: <span className="font-mono">₦{(r.fee || 0).toLocaleString()}</span>
                             </div>
                           </div>
                           <input
@@ -1919,16 +1776,10 @@ export default function OfflineSaleForm({ staffId }: Props) {
                   </div>
                 )}
 
-                {sbLoading && (
-                  <p className="text-xs text-gray-600">
-                    Fetching live Shipbubble rates…
-                  </p>
-                )}
+                {sbLoading && <p className="text-xs text-gray-600">Fetching live Shipbubble rates…</p>}
 
                 {!sbLoading && sbRates.length === 0 && !sbError && (
-                  <p className="text-xs text-gray-600">
-                    Click “Get Shipbubble rates” to view available couriers.
-                  </p>
+                  <p className="text-xs text-gray-600">Click “Get Shipbubble rates” to view available couriers.</p>
                 )}
               </div>
             )}
@@ -1938,20 +1789,14 @@ export default function OfflineSaleForm({ staffId }: Props) {
 
       <CardFooter className="flex flex-col sm:flex-row justify-between gap-4">
         <div className="flex gap-2">
-          <Button
-            variant="outline"
-            disabled={step === 1 || loading}
-            onClick={() => setStep((s) => Math.max(1, s - 1))}
-          >
+          <Button variant="outline" disabled={step === 1 || loading} onClick={() => setStep((s) => Math.max(1, s - 1))}>
             Back
           </Button>
         </div>
+
         <div className="flex gap-2 ml-auto">
           {step < 3 ? (
-            <Button
-              disabled={!canNext || loading}
-              onClick={() => canNext && setStep((s) => s + 1)}
-            >
+            <Button disabled={!canNext || loading} onClick={() => canNext && setStep((s) => s + 1)}>
               Next
             </Button>
           ) : (

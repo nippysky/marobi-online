@@ -1,3 +1,4 @@
+/* eslint-disable react-hooks/use-memo */
 // app/admin/product-management/ProductsTable.tsx
 "use client";
 
@@ -54,6 +55,7 @@ import {
   MoreVertical,
   Eye,
 } from "lucide-react";
+import Image from "next/image";
 
 export type AdminProduct = {
   id: string;
@@ -129,7 +131,7 @@ export default function ProductsTable({
       cell: ({ row }) => (
         <div className="flex items-center space-x-2">
           {row.original.image ? (
-            <img
+            <Image
               src={row.original.image}
               alt={row.original.name}
               className="h-10 w-10 rounded-md object-cover border"

@@ -1,3 +1,4 @@
+/* eslint-disable @typescript-eslint/no-explicit-any */
 // app/admin/.../ProductForm.tsx
 "use client";
 
@@ -25,6 +26,7 @@ import { Switch } from "@/components/ui/switch";
 import { Button } from "@/components/ui/button";
 import { Plus, X } from "lucide-react";
 import toast from "react-hot-toast";
+import Image from "next/image";
 
 const CONVENTIONAL_SIZES = ["S", "M", "L", "XL", "R", "B"] as const;
 
@@ -1265,7 +1267,7 @@ export default function ProductForm({
                 >
                   {url ? (
                     <>
-                      <img
+                      <Image
                         src={url}
                         alt={`img-${idx}`}
                         className="object-cover w-full h-full"

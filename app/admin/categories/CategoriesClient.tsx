@@ -34,7 +34,6 @@ export type CategoryRow = {
 
 export default function CategoriesClient({ categories: initial }: { categories: CategoryRow[] }) {
   const router = useRouter();
-  const [openCreate, setOpenCreate] = useState(false);
   const [rows, setRows] = useState<CategoryRow[]>(initial);
   const [pendingSlug, setPendingSlug] = useState<string | null>(null);
   const [isPending, startTransition] = useTransition();
