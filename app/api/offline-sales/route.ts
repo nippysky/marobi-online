@@ -123,23 +123,23 @@ function normalizeShipbubbleDeliveryDetails(dd: unknown): unknown {
     o?.raw?.service_code ??
     null;
 
-const courierId =
-  o?.shipbubble?.courierId ??
-  o?.shipbubble?.courier_id ??
-  o?.shipbubble?.courierCode ??       // ✅ ADD
-  o?.shipbubble?.courier_code ??      // ✅ ADD
-  o?.rate?.courierId ??
-  o?.rate?.courier_id ??
-  o?.rate?.courierCode ??             // ✅ ADD
-  o?.rate?.courier_code ??            // ✅ ADD
-  o?.courierId ??
-  o?.courier_id ??
-  o?.courierCode ??                   // ✅ ADD
-  o?.courier_code ??                  // ✅ ADD
-  o?.raw?.courier_id ??
-  o?.raw?.courierId ??
-  o?.raw?.courierCode ??              // ✅ ADD
-  null;
+  const courierId =
+    o?.shipbubble?.courierId ??
+    o?.shipbubble?.courier_id ??
+    o?.shipbubble?.courierCode ?? // ✅ ADD
+    o?.shipbubble?.courier_code ?? // ✅ ADD
+    o?.rate?.courierId ??
+    o?.rate?.courier_id ??
+    o?.rate?.courierCode ?? // ✅ ADD
+    o?.rate?.courier_code ?? // ✅ ADD
+    o?.courierId ??
+    o?.courier_id ??
+    o?.courierCode ?? // ✅ ADD
+    o?.courier_code ?? // ✅ ADD
+    o?.raw?.courier_id ??
+    o?.raw?.courierId ??
+    o?.raw?.courierCode ?? // ✅ ADD
+    null;
 
   const courierName =
     o?.shipbubble?.courierName ??
@@ -298,9 +298,8 @@ export async function POST(req: NextRequest) {
     // ── Optional delivery option
     // FIX: If Shipbubble is used but deliveryOptionId wasn't passed,
     // auto-attach an active deliveryOption whose provider/name indicates Shipbubble.
-    let deliveryOptionRecord:
-      | { id: string; baseFee: number | null }
-      | null = null;
+    let deliveryOptionRecord: | { id: string; baseFee: number | null } | null =
+      null;
 
     if (deliveryOptionId) {
       const opt = await prisma.deliveryOption.findUnique({
@@ -534,11 +533,11 @@ export async function POST(req: NextRequest) {
       });
 
       try {
-        const vatRate = 0.075;
+        // ✅ VAT REMOVED: totals are now Subtotal + Delivery only
         const subtotal = +order.totalAmount.toFixed(2);
-        const vat = +(subtotal * vatRate).toFixed(2);
         const deliveryCharge = order.deliveryFee ?? 0;
-        const grandTotal = +(subtotal + vat + deliveryCharge).toFixed(2);
+        const grandTotal = +(subtotal + deliveryCharge).toFixed(2);
+
         const sym =
           order.currency === "NGN"
             ? "₦"
@@ -581,7 +580,8 @@ export async function POST(req: NextRequest) {
               deliveryMethodLabel = "Shipbubble Delivery";
             }
 
-            const courierName = rate.courierName || rawDetails.courierName || "Courier";
+            const courierName =
+              rate.courierName || rawDetails.courierName || "Courier";
             const serviceCode = (rate.serviceCode || rawDetails.serviceCode)
               ? ` (${rate.serviceCode || rawDetails.serviceCode})`
               : "";
@@ -667,7 +667,6 @@ export async function POST(req: NextRequest) {
 
             <div style="margin-top:24px;font-family:monospace">
               <p style="margin:6px 0">Subtotal: <strong>${sym}${subtotal.toLocaleString()}</strong></p>
-              <p style="margin:6px 0">VAT (7.5%): <strong>${sym}${vat.toLocaleString()}</strong></p>
               <p style="margin:6px 0">Delivery: <strong>${sym}${deliveryCharge.toLocaleString()}</strong></p>
               <p style="margin:6px 0">Grand Total: <strong>${sym}${grandTotal.toLocaleString()}</strong></p>
             </div>
