@@ -15,6 +15,14 @@ declare global {
   var __PRISMA_READY__: Promise<void> | undefined;
 }
 
+function mustGetEnv(name: string): string {
+  const v = process.env[name];
+  if (!v) {
+    throw new Error(`[db] Missing required env var: ${name}`);
+  }
+  return v;
+}
+
 /**
  * Read the DigitalOcean CA from env, if present.
  *
@@ -29,12 +37,8 @@ function getDoCaFromEnv(): string | undefined {
   if (base64) {
     try {
       const pem = Buffer.from(base64, "base64").toString("utf8");
-      if (pem.includes("BEGIN CERTIFICATE")) {
-        return pem;
-      }
-      console.warn(
-        "[db] DO_DB_CA_CERT_BASE64 decoded, but did not look like a PEM certificate."
-      );
+      if (pem.includes("BEGIN CERTIFICATE")) return pem;
+      console.warn("[db] DO_DB_CA_CERT_BASE64 decoded but did not look like PEM.");
     } catch (err) {
       console.warn("[db] Failed to decode DO_DB_CA_CERT_BASE64:", err);
     }
@@ -42,76 +46,92 @@ function getDoCaFromEnv(): string | undefined {
 
   if (pemRaw) {
     const pem = pemRaw.includes("\\n") ? pemRaw.replace(/\\n/g, "\n") : pemRaw;
-    if (pem.includes("BEGIN CERTIFICATE")) {
-      return pem;
-    }
-    console.warn(
-      "[db] DO_DB_CA_CERT is set but does not look like a PEM certificate."
-    );
+    if (pem.includes("BEGIN CERTIFICATE")) return pem;
+    console.warn("[db] DO_DB_CA_CERT is set but does not look like PEM.");
   }
 
   return undefined;
 }
 
 /**
- * Decide SSL config:
- * - In **production-like** envs (NODE_ENV=production or VERCEL set) AND a CA is present
- *   → use strict TLS with that CA.
- * - In **local dev** (default) or if CA looks sketchy
- *   → fall back to `rejectUnauthorized:false` to avoid TLS “self-signed” hell.
+ * Validate/parse the connection string as a URL early.
+ * Prisma's adapter layer can crash with "searchParams of undefined"
+ * if the URL is malformed (often due to unescaped characters in password).
  */
-function buildSslConfig(): PoolConfig["ssl"] {
-  const ca = getDoCaFromEnv();
-  const nodeEnv = process.env.NODE_ENV ?? "development";
-  const isProdLike =
-    nodeEnv === "production" || process.env.VERCEL === "1";
-
-  if (isProdLike && ca) {
-    console.log(
-      "[db] Using strict TLS with DigitalOcean CA (production-like environment)."
+function parseDatabaseUrl(raw: string): URL {
+  try {
+    return new URL(raw);
+  } catch (err) {
+    throw new Error(
+      `[db] DATABASE_URL is not a valid URL. ` +
+        `If your password contains special characters (e.g. # ? @ / %), URL-encode it. ` +
+        `Original error: ${(err as Error).message}`
     );
-    return {
-      ca,
-      rejectUnauthorized: true,
-    };
   }
-
-  console.warn(
-    "[db] Using RELAXED TLS for Postgres (rejectUnauthorized=false). " +
-      "This is expected in local dev, and avoids 'self-signed certificate in certificate chain' errors."
-  );
-
-  return {
-    rejectUnauthorized: false,
-  };
 }
 
 /**
  * Some connection strings have `?sslmode=require` etc.
- * That’s fine, but we don’t want it fighting with our `ssl` config,
- * so we strip only the `sslmode` query param and keep the rest.
+ * We let the "pg" driver handle TLS via Pool.ssl,
+ * so we strip only the `sslmode` query param (and keep the rest).
  */
 function sanitizeConnectionString(raw: string): string {
-  try {
-    const u = new URL(raw);
-    u.searchParams.delete("sslmode");
-    return u.toString();
-  } catch {
-    return raw;
+  const u = parseDatabaseUrl(raw);
+  u.searchParams.delete("sslmode");
+  return u.toString();
+}
+
+/**
+ * Build SSL config based on hostname:
+ * - DO managed host (*.db.ondigitalocean.com): use DO CA if present (strict).
+ * - Non-DO host (your droplet ops.panth.art with Let's Encrypt): use system trust (strict) in prod.
+ * - Local dev: allow relaxed TLS to avoid self-signed chain pain.
+ */
+function buildSslConfig(dbUrl: URL): PoolConfig["ssl"] {
+  const nodeEnv = process.env.NODE_ENV ?? "development";
+  const isProdLike = nodeEnv === "production" || process.env.VERCEL === "1";
+
+  const host = dbUrl.hostname;
+  const isDoManaged = host.endsWith(".db.ondigitalocean.com");
+  const ca = getDoCaFromEnv();
+
+  if (isDoManaged) {
+    if (isProdLike) {
+      if (!ca) {
+        throw new Error(
+          "[db] Connecting to DigitalOcean Managed Postgres but DO_DB_CA_CERT(_BASE64) is missing. " +
+            "Set the CA cert env var or use a non-DO host."
+        );
+      }
+      console.log("[db] Using strict TLS with DigitalOcean CA (DO managed DB).");
+      return { ca, rejectUnauthorized: true };
+    }
+
+    // Dev-ish environment: allow you to work even if CA isn't set.
+    console.warn("[db] Using RELAXED TLS for DO managed DB (dev).");
+    return ca ? { ca, rejectUnauthorized: true } : { rejectUnauthorized: false };
   }
+
+  // Non-DO host: use normal public PKI trust (Let's Encrypt, etc.)
+  if (isProdLike) {
+    console.log("[db] Using strict TLS with system trust store (non-DO host).");
+    return { rejectUnauthorized: true };
+  }
+
+  console.warn(
+    "[db] Using RELAXED TLS for Postgres in local dev (rejectUnauthorized=false)."
+  );
+  return { rejectUnauthorized: false };
 }
 
 function createClient(): PrismaClient {
-  const connectionString = process.env.DATABASE_URL;
-  if (!connectionString) {
-    throw new Error(
-      "[prisma] DATABASE_URL is not set. " +
-        "Check your DigitalOcean connection string and environment variables."
-    );
-  }
+  const raw = mustGetEnv("DATABASE_URL");
 
-  const sanitized = sanitizeConnectionString(connectionString);
-  const ssl = buildSslConfig();
+  // Validate early (prevents Prisma "searchParams undefined" crashes)
+  const dbUrl = parseDatabaseUrl(raw);
+
+  const sanitized = sanitizeConnectionString(raw);
+  const ssl = buildSslConfig(dbUrl);
 
   const pool = new Pool({
     connectionString: sanitized,
@@ -120,13 +140,9 @@ function createClient(): PrismaClient {
 
   const client = new PrismaClient({
     adapter: new PrismaPg(pool),
-    log:
-      process.env.NODE_ENV === "development"
-        ? ["warn", "error"]
-        : ["error"],
+    log: process.env.NODE_ENV === "development" ? ["warn", "error"] : ["error"],
   });
 
-  // Graceful shutdown when Node process ends (where applicable)
   try {
     process.once("beforeExit", async () => {
       try {
@@ -136,7 +152,7 @@ function createClient(): PrismaClient {
       }
     });
   } catch {
-    // Some runtimes may not have `process`; safe to ignore.
+    /* noop */
   }
 
   return client;
